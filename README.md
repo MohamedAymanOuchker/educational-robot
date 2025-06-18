@@ -2,7 +2,7 @@
 
 An affordable educational robotics platform designed to teach programming concepts to children aged 7-12 through hands-on interaction with a physical robot (developed as part of my engineering final year project internship).
 
-<!--//![Robot Image](docs/images/robot-overview.jpg)-->
+![Robot Image](docs/images/robot-overview.jpg)
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32-green.svg)
