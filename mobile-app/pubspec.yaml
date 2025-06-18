@@ -1,0 +1,37 @@
+name: robocode
+description: A mobile app for programming robots with visual block-based coding.
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.17.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_inappwebview: ^6.0.0
+  flutter_blue_plus: ^1.14.6
+  wifi_iot: ^0.3.18
+  provider: ^6.0.5
+  shared_preferences: ^2.2.2
+  google_fonts: ^6.1.0
+  lottie: ^2.2.0
+  cupertino_icons: ^1.0.2
+  permission_handler: ^11.0.1
+  http: ^1.1.0
+  json_annotation: ^4.8.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+  json_serializable: ^6.7.1
+  build_runner: ^2.4.7
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/animations/
+    - assets/images/

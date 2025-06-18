@@ -1,0 +1,31 @@
+# Arduino/ESP32
+*.ino.bin
+*.ino.elf
+*.ino.map
+.pio/
+.vscode/
+
+# Flutter
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Personal
+secrets.h
+config_local.h
