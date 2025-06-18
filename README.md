@@ -4,6 +4,12 @@ An affordable educational robotics platform designed to teach programming concep
 
 <!--//![Robot Image](docs/images/robot-overview.jpg)-->
 
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Platform](https://img.shields.io/badge/platform-ESP32-green.svg)
+![Flutter](https://img.shields.io/badge/Flutter-2.0+-blue.svg)
+![Cost](https://img.shields.io/badge/cost-under%20$40-brightgreen.svg)
+![Age](https://img.shields.io/badge/age-7--12%20years-orange.svg)
+
 ## 🎯 Project Overview
 
 This project bridges the gap between simple toy robots and expensive educational kits by providing a **sub-$40 solution** that delivers comparable learning outcomes. The system combines:
