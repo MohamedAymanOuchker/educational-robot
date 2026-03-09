@@ -26,21 +26,21 @@ class HomeScreen extends StatelessWidget {
                       'https://images.pexels.com/photos/2085831/pexels-photo-2085831.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1'),
                   fit: BoxFit.cover,
                   colorFilter: ColorFilter.mode(
-                    Colors.purple.withOpacity(0.7),
+                    Colors.purple.withValues(alpha: 0.7),
                     BlendMode.overlay,
                   ),
                 ),
                 gradient: LinearGradient(
                   colors: [
-                    Colors.purple[300]!.withOpacity(0.9),
-                    Colors.purple[400]!.withOpacity(0.9)
+                    Colors.purple[300]!.withValues(alpha: 0.9),
+                    Colors.purple[400]!.withValues(alpha: 0.9)
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.purple.withOpacity(0.3),
+                    color: Colors.purple.withValues(alpha: 0.3),
                     spreadRadius: 2,
                     blurRadius: 8,
                     offset: Offset(0, 4),
@@ -212,7 +212,7 @@ class HomeScreen extends StatelessWidget {
         child: Card(
           elevation: isActive ? 12 : 8,
           shadowColor:
-              isLocked ? Colors.grey.withOpacity(0.3) : color.withOpacity(0.3),
+              isLocked ? Colors.grey.withValues(alpha: 0.3) : color.withValues(alpha: 0.3),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -224,7 +224,7 @@ class HomeScreen extends StatelessWidget {
                       end: Alignment.bottomRight,
                     )
                   : LinearGradient(
-                      colors: [color.withOpacity(0.1), color.withOpacity(0.05)],
+                      colors: [color.withValues(alpha: 0.1), color.withValues(alpha: 0.05)],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -236,13 +236,13 @@ class HomeScreen extends StatelessWidget {
                   height: 70,
                   decoration: BoxDecoration(
                     color:
-                        isLocked ? Colors.grey[300] : color.withOpacity(0.15),
+                        isLocked ? Colors.grey[300] : color.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: isLocked
                         ? []
                         : [
                             BoxShadow(
-                              color: color.withOpacity(0.2),
+                              color: color.withValues(alpha: 0.2),
                               spreadRadius: 1,
                               blurRadius: 6,
                               offset: Offset(0, 3),
@@ -280,10 +280,10 @@ class HomeScreen extends StatelessWidget {
                                   horizontal: 8, vertical: 4),
                               margin: const EdgeInsets.only(left: 8),
                               decoration: BoxDecoration(
-                                color: Colors.green.withOpacity(0.1),
+                                color: Colors.green.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Colors.green.withOpacity(0.3),
+                                  color: Colors.green.withValues(alpha: 0.3),
                                   width: 1,
                                 ),
                               ),
@@ -335,7 +335,7 @@ class HomeScreen extends StatelessWidget {
                                 borderRadius: BorderRadius.circular(15),
                               ),
                               elevation: 4,
-                              shadowColor: color.withOpacity(0.4),
+                              shadowColor: color.withValues(alpha: 0.4),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,

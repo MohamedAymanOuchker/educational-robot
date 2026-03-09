@@ -6,7 +6,6 @@ import 'services/robot_service.dart';
 import 'screens/home_screen.dart';
 import 'screens/connect_screen.dart';
 import 'screens/code_screen.dart';
-import 'screens/run_screen.dart';
 import 'screens/sensors_screen.dart';
 
 void main() {
@@ -121,7 +120,7 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
       String robotName = '';
       if (_isConnected && _robotService!.connectedBluetoothDevice != null) {
         robotName =
-            _robotService!.connectedBluetoothDevice!.name ?? 'Unknown Robot';
+            _robotService!.connectedBluetoothDevice!.platformName;
       }
       appState.updateConnectionStatus(_isConnected, robotName: robotName);
     });
@@ -237,7 +236,7 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
         decoration: BoxDecoration(
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 10,
               offset: const Offset(0, -5),
             ),

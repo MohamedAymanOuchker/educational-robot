@@ -16,51 +16,6 @@ class CodeScreen extends StatefulWidget {
 }
 
 class _CodeScreenState extends State<CodeScreen> {
-  // FIXED: Updated to match actual generated code patterns
-  Future<bool> _validateLevelCompletion(String code, int levelId) async {
-    print('Validating level $levelId completion with code: $code');
-
-    switch (levelId) {
-      case 1: // Basic Movement - just need any movement command
-        bool hasMovement = code.contains('sendCommand("F"') ||
-            code.contains('sendCommand("B"') ||
-            code.contains('sendCommand("L"') ||
-            code.contains('sendCommand("R"');
-        print('Level 1 - Has movement: $hasMovement');
-        return hasMovement;
-
-      case 2: // Path Planning - need movement + wait
-        bool hasMovement = code.contains('sendCommand("F"') ||
-            code.contains('sendCommand("B"') ||
-            code.contains('sendCommand("L"') ||
-            code.contains('sendCommand("R"');
-        bool hasWait = code.contains('Future.delayed');
-        print('Level 2 - Has movement: $hasMovement, Has wait: $hasWait');
-        return hasMovement && hasWait;
-
-      case 3: // Sensor Integration - need sensor usage
-        bool hasSensor =
-            code.contains('getDistance()') || code.contains('if (');
-        print('Level 3 - Has sensor: $hasSensor');
-        return hasSensor;
-
-      case 4: // Auto Mode - need auto navigation
-        bool hasAuto = code.contains('sendCommand("AUTO_NAV")');
-        print('Level 4 - Has auto: $hasAuto');
-        return hasAuto;
-
-      case 5: // Advanced Navigation - complex behaviors
-        bool hasAdvanced = code.contains('sendCommand("AUTO_NAV")') ||
-            code.contains('sendCommand("PATROL")') ||
-            code.contains('sendCommand("MAP")');
-        print('Level 5 - Has advanced: $hasAdvanced');
-        return hasAdvanced;
-
-      default:
-        return false;
-    }
-  }
-
   // ENHANCED: Better completion validation using blocks directly
   Future<bool> _validateLevelCompletionByBlocks(
       List<Block> blocks, int levelId) async {
@@ -388,7 +343,7 @@ class _LevelCard extends StatelessWidget {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.1),
+                color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(

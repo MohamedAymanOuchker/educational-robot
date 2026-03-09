@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../widgets/block_editor/block_types.dart';
 import '../../widgets/block_editor/block_widget.dart';
@@ -155,7 +154,7 @@ class _BlockEditorWidgetState extends State<BlockEditorWidget> {
         child: Container(
           padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           decoration: BoxDecoration(
-            color: block.color.withOpacity(0.9),
+            color: block.color.withValues(alpha: 0.9),
             borderRadius: BorderRadius.circular(8.0),
           ),
           child: Text(
@@ -207,7 +206,7 @@ class _BlockEditorWidgetState extends State<BlockEditorWidget> {
             color: Colors.white,
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
+                color: Colors.black.withValues(alpha: 0.1),
                 blurRadius: 4.0,
                 offset: Offset(0, 2),
               ),
@@ -257,7 +256,7 @@ class _BlockEditorWidgetState extends State<BlockEditorWidget> {
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors.black.withValues(alpha: 0.1),
                       blurRadius: 4.0,
                       offset: Offset(2, 0),
                     ),
@@ -287,8 +286,9 @@ class _BlockEditorWidgetState extends State<BlockEditorWidget> {
                       ),
                     );
                   },
-                  onWillAccept: (block) => block != null,
-                  onAccept: (block) {
+                  onWillAcceptWithDetails: (details) => true,
+                  onAcceptWithDetails: (details) {
+                    final block = details.data;
                     setState(() {
                       // Create a new block instance
                       final newBlock = Block(
@@ -326,7 +326,7 @@ class _BlockEditorWidgetState extends State<BlockEditorWidget> {
         ),
       ),
       style: TextButton.styleFrom(
-        backgroundColor: color.withOpacity(0.1),
+        backgroundColor: color.withValues(alpha: 0.1),
         padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),

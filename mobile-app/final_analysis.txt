@@ -1,0 +1,4 @@
+Analyzing mobile-app...                                         
+
+   info - 'translate' is deprecated and shouldn't be used. Use translateByVector3, translateByVector4, or translateByDouble instead - lib\widgets\block_editor\block_widget.dart:101:17 - deprecated_member_use
+

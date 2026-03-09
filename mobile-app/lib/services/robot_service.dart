@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -67,11 +66,11 @@ class RobotService {
       }
 
       // Check if Bluetooth is available and on
-      if (await FlutterBluePlus.isAvailable == false) {
+      if (await FlutterBluePlus.isSupported == false) {
         throw Exception('Bluetooth not available');
       }
 
-      if (await FlutterBluePlus.isOn == false) {
+      if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
         throw Exception('Bluetooth is turned off');
       }
 
@@ -140,7 +139,7 @@ class RobotService {
         _startSensorReading();
       }
 
-      print('Successfully connected to ${device.name}');
+      print('Successfully connected to ${device.platformName}');
       return true;
     } catch (e) {
       print('Bluetooth connection error: $e');

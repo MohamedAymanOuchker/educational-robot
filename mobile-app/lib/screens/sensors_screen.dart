@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:math' as math;
 import '../services/robot_service.dart';
 
 class SensorsScreen extends StatefulWidget {
@@ -228,7 +227,7 @@ class _SensorsScreenState extends State<SensorsScreen>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: Colors.blue.withOpacity(0.2),
+                              color: Colors.blue.withValues(alpha: 0.2),
                               width: 20,
                             ),
                           ),
@@ -239,7 +238,7 @@ class _SensorsScreenState extends State<SensorsScreen>
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: _getDistanceColor(currentDistance)
-                                .withOpacity(0.1),
+                                .withValues(alpha: 0.1),
                           ),
                         ),
                         Text(
@@ -315,7 +314,7 @@ class _SensorsScreenState extends State<SensorsScreen>
                       child: Container(
                         padding: EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
+                          color: Colors.red.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
@@ -420,7 +419,7 @@ class _SensorsScreenState extends State<SensorsScreen>
     return Container(
       padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: (isActive ? color : Colors.grey).withOpacity(0.1),
+        color: (isActive ? color : Colors.grey).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Icon(icon, color: isActive ? color : Colors.grey, size: 24),
@@ -453,7 +452,7 @@ class _SensorsScreenState extends State<SensorsScreen>
     return Container(
       padding: EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(

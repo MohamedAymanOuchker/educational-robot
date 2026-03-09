@@ -113,14 +113,14 @@ class _ConnectScreenState extends State<ConnectScreen>
                 SizedBox(width: 8),
                 Expanded(
                     child: Text(
-                        'Connected to ${device.name ?? 'Unknown Device'}')),
+                        'Connected to ${device.platformName}')),
               ],
             ),
             backgroundColor: Colors.green,
           ),
         );
       } else {
-        _showErrorSnackBar('Failed to connect to ${device.name ?? 'device'}');
+        _showErrorSnackBar('Failed to connect to ${device.platformName}');
       }
     } catch (e) {
       _showErrorSnackBar('Connection error: $e');
@@ -299,7 +299,7 @@ class _ConnectScreenState extends State<ConnectScreen>
         children: [
           // Connection Status Card
           Card(
-            color: _getStatusColor(connectionStatus).withOpacity(0.1),
+            color: _getStatusColor(connectionStatus).withValues(alpha: 0.1),
             child: Padding(
               padding: EdgeInsets.all(16),
               child: Row(
@@ -332,7 +332,7 @@ class _ConnectScreenState extends State<ConnectScreen>
                         if (connectedDevice != null) ...[
                           SizedBox(height: 4),
                           Text(
-                            'Connected to: ${connectedDevice!.name ?? 'Unknown Device'}',
+                            'Connected to: ${connectedDevice!.platformName}',
                             style: GoogleFonts.comicNeue(
                               fontSize: 14,
                               color: Colors.grey[600],
@@ -415,12 +415,12 @@ class _ConnectScreenState extends State<ConnectScreen>
 
   Widget _buildBluetoothDeviceCard(ScanResult scanResult) {
     BluetoothDevice device = scanResult.device;
-    bool isConnectedToThis = connectedDevice?.id == device.id;
-    bool showDevice = device.name.isNotEmpty &&
-        (device.name.toLowerCase().contains('robot') ||
-            device.name.toLowerCase().contains('esp32') ||
-            device.name.toLowerCase().contains('arduino') ||
-            device.name.toLowerCase().contains('bot'));
+    bool isConnectedToThis = connectedDevice?.remoteId == device.remoteId;
+    bool showDevice = device.platformName.isNotEmpty &&
+        (device.platformName.toLowerCase().contains('robot') ||
+            device.platformName.toLowerCase().contains('esp32') ||
+            device.platformName.toLowerCase().contains('arduino') ||
+            device.platformName.toLowerCase().contains('bot'));
 
     // Always show devices that match robot-like names, or if no filter matches show all
     if (!showDevice && bluetoothDevices.length < 5) showDevice = true;
@@ -434,8 +434,8 @@ class _ConnectScreenState extends State<ConnectScreen>
           padding: EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: isConnectedToThis
-                ? Colors.green.withOpacity(0.1)
-                : Colors.blue.withOpacity(0.1),
+                ? Colors.green.withValues(alpha: 0.1)
+                : Colors.blue.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(
@@ -444,13 +444,13 @@ class _ConnectScreenState extends State<ConnectScreen>
           ),
         ),
         title: Text(
-          device.name.isNotEmpty ? device.name : 'Unknown Device',
+          device.platformName.isNotEmpty ? device.platformName : 'Unknown Device',
           style: GoogleFonts.comicNeue(fontWeight: FontWeight.w600),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(device.id.id),
+            Text(device.remoteId.str),
             if (scanResult.rssi != 0)
               Text('Signal: ${scanResult.rssi} dBm',
                   style: TextStyle(fontSize: 12)),
@@ -568,8 +568,8 @@ class _ConnectScreenState extends State<ConnectScreen>
           padding: EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: isConnectedToThis
-                ? Colors.green.withOpacity(0.1)
-                : Colors.blue.withOpacity(0.1),
+                ? Colors.green.withValues(alpha: 0.1)
+                : Colors.blue.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Icon(

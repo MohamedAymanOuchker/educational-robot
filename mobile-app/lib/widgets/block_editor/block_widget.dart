@@ -41,7 +41,7 @@ class _BlockWidgetState extends State<BlockWidget> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 4,
             offset: Offset(0, 2),
           ),
@@ -98,7 +98,7 @@ class _BlockWidgetState extends State<BlockWidget> {
           child: AnimatedContainer(
             duration: Duration(milliseconds: 200),
             transform: Matrix4.identity()
-              ..translate(0.0, _isDragging ? -10.0 : 0.0, 0.0),
+              ..translateByDouble(_isDragging ? -10.0 : 0.0, 0.0, 0.0, 0.0),
             child: blockContent,
           ),
         ),
@@ -202,7 +202,7 @@ class _BlockWidgetState extends State<BlockWidget> {
             width: 24,
             height: 24,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Icon(
@@ -227,7 +227,7 @@ class _BlockWidgetState extends State<BlockWidget> {
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.2),
+                color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Text(
@@ -250,10 +250,10 @@ class _BlockWidgetState extends State<BlockWidget> {
       padding: EdgeInsets.all(8),
       constraints: BoxConstraints(maxWidth: 280),
       decoration: BoxDecoration(
-        color: widget.block.color.withOpacity(0.7),
+        color: widget.block.color.withValues(alpha: 0.7),
         border: Border(
           left: BorderSide(
-            color: Colors.white.withOpacity(0.3),
+            color: Colors.white.withValues(alpha: 0.3),
             width: 2,
           ),
         ),
@@ -279,7 +279,7 @@ class _BlockWidgetState extends State<BlockWidget> {
                     height: 40,
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.5),
+                        color: Colors.white.withValues(alpha: 0.5),
                         width: 2,
                         style: BorderStyle.solid,
                       ),
@@ -290,8 +290,9 @@ class _BlockWidgetState extends State<BlockWidget> {
             ),
           );
         },
-        onWillAccept: (block) => block != null && block != widget.block,
-        onAccept: (block) {
+        onWillAcceptWithDetails: (details) => details.data != widget.block,
+        onAcceptWithDetails: (details) {
+          final block = details.data;
           if (widget.onBlockSnapped != null) {
             block.parent = widget.block;
             widget.block.children.add(block);
@@ -371,7 +372,7 @@ class ConnectionPoint extends StatelessWidget {
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withValues(alpha: 0.1),
               blurRadius: 2,
               offset: Offset(0, 1),
             ),
