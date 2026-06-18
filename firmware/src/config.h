@@ -47,4 +47,14 @@
 #define MAX_DISTANCE        999.0   // cm
 #define ULTRASONIC_TIMEOUT  30000   // microseconds
 
+// Battery Monitoring
+// NOTE: Wire the battery through a resistor divider into an ADC1 pin.
+// ADC2 pins cannot be used while BLE/Wi-Fi is active. GPIO 34-39 are
+// input-only and ideal for analog sensing. Adjust the divider ratio and
+// the voltage range to match your pack (defaults: 2S Li-Po, /3 divider).
+#define BATTERY_PIN             35      // ADC1_CH7 (input-only, BLE-safe)
+#define BATTERY_DIVIDER_RATIO   3.0     // (R1 + R2) / R2 of the divider
+#define BATTERY_MAX_VOLTAGE     8.4     // fully charged (2S = 4.2V/cell)
+#define BATTERY_MIN_VOLTAGE     6.0     // empty (2S = 3.0V/cell)
+
 #endif // CONFIG_H

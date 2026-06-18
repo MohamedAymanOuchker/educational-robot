@@ -1,6 +1,7 @@
 #ifndef BLE_COMMUNICATION_H
 #define BLE_COMMUNICATION_H
 
+#include <Arduino.h>
 #include "types.h"
 #include "config.h"
 #include <BLEDevice.h>
