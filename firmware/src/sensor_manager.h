@@ -25,6 +25,14 @@ private:
   // (core 0) and the motor/navigation task (core 1) during autonomy.
   SemaphoreHandle_t ultrasonicMutex;
 
+  // Set from the motor task; the sensor task services it so all IMU/I2C
+  // access stays on a single core.
+  volatile bool recalibrateRequested;
+
+  // Persisted calibration (NVS)
+  bool loadCalibration();
+  void saveCalibration();
+
 public:
   SensorManager();
   
@@ -32,6 +40,11 @@ public:
   void begin();
   bool initializeIMU();
   void calibrateIMU();
+
+  // Recalibration requested over BLE; request is non-blocking, the sensor
+  // task runs the actual (blocking) calibration via serviceRecalibration().
+  void requestRecalibration();
+  void serviceRecalibration();
   
   // Distance sensor functions
   float readDistanceCM();

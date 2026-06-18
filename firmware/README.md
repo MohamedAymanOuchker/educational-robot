@@ -100,6 +100,7 @@ Commands are sent via BLE in the format: `<TYPE><VALUE>`
 | R | Right turn (degrees) | `R45` |
 | S | Stop | `STOP` |
 | A | Auto mode | `AUTO_NAV` |
+| C | Recalibrate IMU | `CALIBRATE` |
 
 ## 📊 Telemetry Data
 

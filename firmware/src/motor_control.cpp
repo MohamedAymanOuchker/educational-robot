@@ -2,6 +2,11 @@
 #include "sensor_manager.h"
 #include <Arduino.h>
 #include <cmath>
+#include <Preferences.h>
+
+// NVS namespace + key for the persisted motor speed
+static const char* MOTOR_NAMESPACE = "motorcfg";
+static const char* SPEED_KEY = "speed";
 
 // Global instance
 MotorControl motorController;
@@ -23,7 +28,18 @@ void MotorControl::begin() {
   
   // Enable motors by default
   enableMotors();
-  
+
+  // Restore a previously saved speed (falls back to DEFAULT_SPEED)
+  Preferences prefs;
+  if (prefs.begin(MOTOR_NAMESPACE, true)) {
+    int savedSpeed = prefs.getInt(SPEED_KEY, DEFAULT_SPEED);
+    prefs.end();
+    if (savedSpeed >= 200 && savedSpeed <= 1000) {
+      currentSpeed = savedSpeed;
+      Serial.printf("Restored motor speed: %d us\n", currentSpeed);
+    }
+  }
+
   Serial.println("Motor control initialized");
 }
 
@@ -180,6 +196,13 @@ void MotorControl::setSpeed(int speed) {
   if (speed >= 200 && speed <= 1000) { // Safe speed range
     currentSpeed = speed;
     Serial.printf("Motor speed set to %d microseconds\n", speed);
+
+    // Persist so the speed survives a reboot
+    Preferences prefs;
+    if (prefs.begin(MOTOR_NAMESPACE, false)) {
+      prefs.putInt(SPEED_KEY, speed);
+      prefs.end();
+    }
   } else {
     Serial.println("Invalid speed value. Must be between 200-1000 microseconds");
   }

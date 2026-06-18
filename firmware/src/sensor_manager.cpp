@@ -1,6 +1,10 @@
 #include "sensor_manager.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
+
+// NVS namespace for persisted IMU calibration
+static const char* CALIB_NAMESPACE = "imucal";
 
 // Global instance
 SensorManager sensorManager;
@@ -11,7 +15,8 @@ SensorManager::SensorManager()
     currentDistance(MAX_DISTANCE),
     axOffset(0), ayOffset(0), azOffset(0),
     gxOffset(0), gyOffset(0), gzOffset(0),
-    ultrasonicMutex(nullptr) {
+    ultrasonicMutex(nullptr),
+    recalibrateRequested(false) {
 }
 
 void SensorManager::begin() {
@@ -25,14 +30,17 @@ void SensorManager::begin() {
     Serial.println("Warning: failed to create ultrasonic mutex");
   }
 
+  // Seed a sane temperature so the first distance calc has a valid value
+  sensorData.temperature = 20.0;
+
   // Initialize I2C for IMU
   Wire.begin(SDA_PIN, SCL_PIN);
-  
+
   // Initialize IMU
   if (!initializeIMU()) {
     Serial.println("Warning: IMU initialization failed");
   }
-  
+
   // Initial sensor reading
   updateSensorData();
   
@@ -49,9 +57,14 @@ bool SensorManager::initializeIMU() {
   
   Serial.println("IMU connected successfully");
 
-  // Calibrate the gyro bias at boot so yaw integration does not drift.
-  // The robot must be kept still during this.
-  calibrateIMU();
+  // Prefer a stored calibration so we skip the ~3s boot calibration. Only
+  // the very first boot (or a CALIBRATE command) runs the full routine.
+  if (loadCalibration()) {
+    Serial.println("Loaded IMU calibration from NVS (skipping boot calibration)");
+  } else {
+    Serial.println("No stored IMU calibration found; calibrating now");
+    calibrateIMU();
+  }
 
   return true;
 }
@@ -79,8 +92,63 @@ void SensorManager::calibrateIMU() {
   gxOffset = gxSum / samples;
   gyOffset = gySum / samples;
   gzOffset = gzSum / samples;
-  
+
   Serial.println("IMU calibration complete");
+
+  // Persist so subsequent boots can skip this routine
+  saveCalibration();
+}
+
+bool SensorManager::loadCalibration() {
+  Preferences prefs;
+  // Read-only open fails if the namespace was never written
+  if (!prefs.begin(CALIB_NAMESPACE, true)) {
+    return false;
+  }
+
+  bool valid = prefs.getBool("valid", false);
+  if (valid) {
+    axOffset = prefs.getShort("ax", 0);
+    ayOffset = prefs.getShort("ay", 0);
+    azOffset = prefs.getShort("az", 0);
+    gxOffset = prefs.getShort("gx", 0);
+    gyOffset = prefs.getShort("gy", 0);
+    gzOffset = prefs.getShort("gz", 0);
+  }
+
+  prefs.end();
+  return valid;
+}
+
+void SensorManager::saveCalibration() {
+  Preferences prefs;
+  if (!prefs.begin(CALIB_NAMESPACE, false)) {
+    Serial.println("Warning: could not open NVS to save calibration");
+    return;
+  }
+
+  prefs.putShort("ax", axOffset);
+  prefs.putShort("ay", ayOffset);
+  prefs.putShort("az", azOffset);
+  prefs.putShort("gx", gxOffset);
+  prefs.putShort("gy", gyOffset);
+  prefs.putShort("gz", gzOffset);
+  prefs.putBool("valid", true);
+
+  prefs.end();
+  Serial.println("IMU calibration saved to NVS");
+}
+
+void SensorManager::requestRecalibration() {
+  recalibrateRequested = true;
+}
+
+void SensorManager::serviceRecalibration() {
+  if (recalibrateRequested) {
+    recalibrateRequested = false;
+    // Runs in the sensor task so IMU/I2C access stays single-core
+    calibrateIMU();
+  }
 }
 
 float SensorManager::readDistanceCM() {
@@ -102,8 +170,12 @@ float SensorManager::readDistanceCM() {
 
   float result = MAX_DISTANCE;
   if (duration != 0) {
-    // Convert to centimeters
-    float distance = duration * 0.034 / 2;
+    // Temperature-compensated speed of sound: 331.3 + 0.606*T m/s, expressed
+    // as cm/us (/10000). sensorData.temperature is the cached MPU die temp
+    // (an approximation of ambient) refreshed by the sensor task, so we avoid
+    // a cross-core I2C read here.
+    float speedCmPerUs = (331.3 + 0.606 * sensorData.temperature) / 10000.0;
+    float distance = duration * speedCmPerUs / 2.0;
 
     // Validate reading; only a valid sample updates the cached distance
     if (distance >= 2.0 && distance <= 400.0) {
@@ -187,10 +259,11 @@ float SensorManager::readBatteryPercent() {
 }
 
 void SensorManager::updateSensorData() {
+  // Refresh temperature first so readDistanceCM() uses a current value
+  sensorData.temperature = getTemperature();
   sensorData.distance = readDistanceCM();
   updateIMU();
   sensorData.heading = yaw;
-  sensorData.temperature = getTemperature();
   sensorData.batteryLevel = readBatteryPercent();
   sensorData.timestamp = millis();
 }

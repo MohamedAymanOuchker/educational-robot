@@ -183,9 +183,12 @@ void sensorTask(void *parameter) {
   Serial.println("Sensor task started on Core 0");
   
   while (true) {
+    // Run any pending IMU recalibration here so all I2C access stays on one core
+    sensorManager.serviceRecalibration();
+
     // Update sensor readings
     sensorManager.updateSensorData();
-    
+
     // Update IMU data
     sensorManager.updateIMU();
     
@@ -266,7 +269,14 @@ void executeCommand(const Command& cmd) {
         navigator.disableAutonomousMode();
       }
       break;
-      
+
+    case 'C': // Recalibrate IMU (deferred to sensor task; robot must be still)
+      currentState = IDLE;
+      motorController.stopMoving();
+      navigator.disableAutonomousMode();
+      sensorManager.requestRecalibration();
+      break;
+
     default:
       Serial.printf("Unknown command type: %c\n", cmd.type);
       break;
