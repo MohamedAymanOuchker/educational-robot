@@ -6,18 +6,25 @@
 SensorManager sensorManager;
 
 SensorManager::SensorManager() 
-  : yaw(0.0), 
-    lastIMUUpdate(0), 
+  : yaw(0.0),
+    lastIMUUpdate(0),
     currentDistance(MAX_DISTANCE),
     axOffset(0), ayOffset(0), azOffset(0),
-    gxOffset(0), gyOffset(0), gzOffset(0) {
+    gxOffset(0), gyOffset(0), gzOffset(0),
+    ultrasonicMutex(nullptr) {
 }
 
 void SensorManager::begin() {
   // Initialize ultrasonic sensor pins
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
-  
+
+  // Guard for cross-core ultrasonic access (created before the first read)
+  ultrasonicMutex = xSemaphoreCreateMutex();
+  if (ultrasonicMutex == nullptr) {
+    Serial.println("Warning: failed to create ultrasonic mutex");
+  }
+
   // Initialize I2C for IMU
   Wire.begin(SDA_PIN, SCL_PIN);
   
@@ -77,31 +84,38 @@ void SensorManager::calibrateIMU() {
 }
 
 float SensorManager::readDistanceCM() {
+  // Serialize access: concurrent trigger/echo cycles from two cores would
+  // corrupt each other's reading. Held only here (leaf), so no nesting.
+  if (ultrasonicMutex != nullptr) {
+    xSemaphoreTake(ultrasonicMutex, portMAX_DELAY);
+  }
+
   // Send trigger pulse
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-  
+
   // Read echo pulse with timeout
   long duration = pulseIn(ECHO_PIN, HIGH, ULTRASONIC_TIMEOUT);
-  
-  if (duration == 0) {
-    // Timeout - return maximum distance
-    return MAX_DISTANCE;
+
+  float result = MAX_DISTANCE;
+  if (duration != 0) {
+    // Convert to centimeters
+    float distance = duration * 0.034 / 2;
+
+    // Validate reading; only a valid sample updates the cached distance
+    if (distance >= 2.0 && distance <= 400.0) {
+      currentDistance = distance;
+      result = distance;
+    }
   }
-  
-  // Convert to centimeters
-  float distance = duration * 0.034 / 2;
-  
-  // Validate reading
-  if (distance < 2.0 || distance > 400.0) {
-    return MAX_DISTANCE;
+
+  if (ultrasonicMutex != nullptr) {
+    xSemaphoreGive(ultrasonicMutex);
   }
-  
-  currentDistance = distance;
-  return distance;
+  return result;
 }
 
 float SensorManager::getCurrentDistance() const {
