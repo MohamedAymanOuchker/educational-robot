@@ -29,6 +29,14 @@
 #define MAX_MOVE_DISTANCE_CM    500     // reject runaway forward/backward moves
 #define MAX_TURN_ANGLE          360     // degrees
 
+// Closed-loop (IMU-based) turning. EXPERIMENTAL and OFF by default: this path
+// is not yet validated on hardware (turn-direction sign and convergence must
+// be checked on the robot). Toggle at runtime with CLOOP_ON / CLOOP_OFF.
+#define CLOSED_LOOP_TURN_DEFAULT 0      // 0 = open-loop step counting
+#define TURN_TOLERANCE_DEG       2.0    // stop within this many degrees
+#define TURN_TIMEOUT_MS          5000   // give up if it cannot converge
+#define TURN_STEP_BATCH          5      // steps between yaw samples
+
 // Navigation Constants
 #define MIN_OBSTACLE_DIST   25      // cm
 #define CRITICAL_DISTANCE   15      // cm

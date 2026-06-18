@@ -277,6 +277,10 @@ void executeCommand(const Command& cmd) {
       sensorManager.requestRecalibration();
       break;
 
+    case 'K': // Toggle closed-loop (IMU-based) turning (experimental)
+      motorController.setClosedLoop(cmd.value == 1);
+      break;
+
     default:
       Serial.printf("Unknown command type: %c\n", cmd.type);
       break;
