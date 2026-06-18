@@ -6,8 +6,9 @@
 // Global instance
 MotorControl motorController;
 
-MotorControl::MotorControl() 
-  : currentSpeed(DEFAULT_SPEED), 
+MotorControl::MotorControl()
+  : currentSpeed(DEFAULT_SPEED),
+    stopRequested(false),
     wheelCircumference(PI * WHEEL_DIAMETER) {
 }
 
@@ -71,8 +72,14 @@ void MotorControl::moveForward(int distanceCM) {
 
 void MotorControl::moveForwardSteps(int steps) {
   Serial.printf("Moving forward %d steps\n", steps);
-  
+
   for (int i = 0; i < steps; i++) {
+    // Abort if a stop was requested mid-move
+    if (stopRequested) {
+      Serial.println("Move interrupted by stop request");
+      break;
+    }
+
     // Safety check every 50 steps
     if (i % 50 == 0) {
       if (sensorManager.getCurrentDistance() < CRITICAL_DISTANCE) {
@@ -80,7 +87,7 @@ void MotorControl::moveForwardSteps(int steps) {
         break;
       }
     }
-    
+
     digitalWrite(LEFT_DIR_PIN, HIGH);
     digitalWrite(RIGHT_DIR_PIN, HIGH);
     
@@ -104,12 +111,18 @@ void MotorControl::moveBackwardSteps(int steps) {
   
   digitalWrite(LEFT_DIR_PIN, LOW);
   digitalWrite(RIGHT_DIR_PIN, LOW);
-  
+
   for (int i = 0; i < steps; i++) {
+    // Abort if a stop was requested mid-move
+    if (stopRequested) {
+      Serial.println("Move interrupted by stop request");
+      break;
+    }
+
     digitalWrite(LEFT_STEP_PIN, HIGH);
     digitalWrite(RIGHT_STEP_PIN, HIGH);
     delayMicroseconds(currentSpeed);
-    
+
     digitalWrite(LEFT_STEP_PIN, LOW);
     digitalWrite(RIGHT_STEP_PIN, LOW);
     delayMicroseconds(currentSpeed);
@@ -132,25 +145,46 @@ void MotorControl::rotateRobot(float degrees) {
   // Set direction pins
   digitalWrite(LEFT_DIR_PIN, degrees > 0 ? HIGH : LOW);
   digitalWrite(RIGHT_DIR_PIN, degrees > 0 ? LOW : HIGH);
-  
+
   for (int i = 0; i < steps; i++) {
+    // Abort if a stop was requested mid-turn
+    if (stopRequested) {
+      Serial.println("Rotation interrupted by stop request");
+      break;
+    }
+
     digitalWrite(LEFT_STEP_PIN, HIGH);
     digitalWrite(RIGHT_STEP_PIN, HIGH);
     delayMicroseconds(currentSpeed);
-    
+
     digitalWrite(LEFT_STEP_PIN, LOW);
     digitalWrite(RIGHT_STEP_PIN, LOW);
     delayMicroseconds(currentSpeed);
   }
 }
 
+void MotorControl::requestStop() {
+  stopRequested = true;
+}
+
+void MotorControl::clearStop() {
+  stopRequested = false;
+}
+
+bool MotorControl::isStopPending() const {
+  return stopRequested;
+}
+
 void MotorControl::stopMoving() {
   Serial.println("Stopping motors");
-  
+
   // Briefly disable then re-enable for immediate stop
   disableMotors();
   delay(10);
   enableMotors();
+
+  // Movement has stopped; re-arm for the next command
+  clearStop();
 }
 
 void MotorControl::emergencyStop() {
@@ -158,6 +192,7 @@ void MotorControl::emergencyStop() {
   disableMotors();
   delay(100);
   enableMotors();
+  clearStop();
 }
 
 void MotorControl::setSpeed(int speed) {

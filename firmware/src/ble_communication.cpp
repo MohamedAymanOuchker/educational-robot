@@ -1,4 +1,5 @@
 #include "ble_communication.h"
+#include "motor_control.h"
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
@@ -161,13 +162,27 @@ Command BLECommunication::parseCommand(const String& cmd) {
   else {
     Serial.printf("Unknown command: %s\n", trimmed.c_str());
   }
-  
+
+  // Clamp parameters to safe ranges so a bad value can't trigger a runaway
+  // (e.g. "F99999") or otherwise multi-minute blocking move.
+  if (command.type == 'F' || command.type == 'B') {
+    command.value = constrain(command.value, 0, MAX_MOVE_DISTANCE_CM);
+  } else if (command.type == 'L' || command.type == 'R') {
+    command.value = constrain(command.value, 0, MAX_TURN_ANGLE);
+  }
+
   return command;
 }
 
 void BLECommunication::processCommand(const String& cmd) {
   Command command = parseCommand(cmd);
-  
+
+  // A stop must interrupt any in-progress blocking move immediately, before
+  // it even reaches the front of the queue.
+  if (command.type == 'S') {
+    motorController.requestStop();
+  }
+
   if (xQueueSend(commandQueue, &command, 0) != pdTRUE) {
     Serial.println("Command queue full, dropping command");
   } else {

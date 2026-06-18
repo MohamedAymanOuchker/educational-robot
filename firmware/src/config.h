@@ -25,6 +25,10 @@
 #define ROBOT_WIDTH         150     // mm
 #define DEFAULT_SPEED       400     // microseconds
 
+// Command Limits (clamp incoming BLE parameters to safe ranges)
+#define MAX_MOVE_DISTANCE_CM    500     // reject runaway forward/backward moves
+#define MAX_TURN_ANGLE          360     // degrees
+
 // Navigation Constants
 #define MIN_OBSTACLE_DIST   25      // cm
 #define CRITICAL_DISTANCE   15      // cm
