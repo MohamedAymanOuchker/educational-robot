@@ -46,25 +46,6 @@ int MotorControl::angleToSteps(float degrees) {
   return (arc / wheelCircumference) * STEPS_PER_REV;
 }
 
-void MotorControl::stepMotor(int steps, int stepPin, int dirPin, bool direction) {
-  digitalWrite(dirPin, direction);
-  
-  for (int i = 0; i < steps; i++) {
-    // Safety check every 50 steps during forward movement
-    if (i % 50 == 0 && stepPin == LEFT_STEP_PIN && direction == HIGH) {
-      if (sensorManager.getCurrentDistance() < CRITICAL_DISTANCE) {
-        Serial.println("Emergency stop: Obstacle detected!");
-        break;
-      }
-    }
-    
-    digitalWrite(stepPin, HIGH);
-    delayMicroseconds(currentSpeed);
-    digitalWrite(stepPin, LOW);
-    delayMicroseconds(currentSpeed);
-  }
-}
-
 void MotorControl::moveForward(int distanceCM) {
   int steps = distanceToSteps(distanceCM);
   moveForwardSteps(steps);
