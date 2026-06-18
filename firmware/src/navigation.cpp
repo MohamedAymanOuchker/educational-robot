@@ -99,6 +99,12 @@ float Navigation::findBestPath() {
   int currentHeading = 0;
 
   for (int angle = SCAN_ANGLE_START; angle <= SCAN_ANGLE_END; angle += SCAN_ANGLE_STEP) {
+    // Bail out of the scan promptly if the user requested a stop
+    if (motorController.isStopPending()) {
+      Serial.println("Scan aborted by stop request");
+      break;
+    }
+
     // Turn by the difference between where we are and the target scan angle
     motorController.rotateRobot(angle - currentHeading);
     currentHeading = angle;

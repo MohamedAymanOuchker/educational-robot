@@ -220,7 +220,12 @@ void communicationTask(void *parameter) {
 
 void executeCommand(const Command& cmd) {
   Serial.printf("Executing command: %c%d\n", cmd.type, cmd.value);
-  
+
+  // A new explicit movement command re-arms motion after any prior stop
+  if (cmd.type == 'F' || cmd.type == 'B' || cmd.type == 'L' || cmd.type == 'R') {
+    motorController.clearStop();
+  }
+
   switch (cmd.type) {
     case 'F': // Forward
       currentState = MOVING_FORWARD;

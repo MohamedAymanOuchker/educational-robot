@@ -7,8 +7,11 @@
 class MotorControl {
 private:
   int currentSpeed;
+  // Set from the BLE task to abort an in-progress blocking move. volatile
+  // because it is written and read from different FreeRTOS tasks/cores.
+  volatile bool stopRequested;
   const float wheelCircumference;
-  
+
   void stepMotor(int steps, int stepPin, int dirPin, bool direction);
   int distanceToSteps(int distanceCM);
   int angleToSteps(float degrees);
@@ -30,6 +33,9 @@ public:
   // Control functions
   void stopMoving();
   void emergencyStop();
+  void requestStop();        // ask an in-progress move to abort (non-blocking)
+  void clearStop();          // re-arm motion for the next command
+  bool isStopPending() const; // true while an abort is outstanding
   void setSpeed(int speed);
   int getSpeed() const;
   
