@@ -6,6 +6,8 @@
 #include "config.h"
 #include <MPU6050.h>
 #include <Wire.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 class SensorManager {
 private:
@@ -18,6 +20,10 @@ private:
   // IMU calibration values
   int16_t axOffset, ayOffset, azOffset;
   int16_t gxOffset, gyOffset, gzOffset;
+
+  // Serializes HC-SR04 access: readDistanceCM() runs on both the sensor task
+  // (core 0) and the motor/navigation task (core 1) during autonomy.
+  SemaphoreHandle_t ultrasonicMutex;
 
 public:
   SensorManager();
