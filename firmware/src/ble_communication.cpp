@@ -159,6 +159,10 @@ Command BLECommunication::parseCommand(const String& cmd) {
     command.type = 'A';
     command.value = 0;
   }
+  else if (trimmed == "CALIBRATE") {
+    command.type = 'C';
+    command.value = 0;
+  }
   else {
     Serial.printf("Unknown command: %s\n", trimmed.c_str());
   }
