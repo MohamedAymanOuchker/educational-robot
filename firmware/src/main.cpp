@@ -305,18 +305,6 @@ void handleSystemError(const String& error) {
   }
   
   // Flash LED or other error indication could go here
-  
-  // In a real application, you might want to restart or enter safe mode
-}
 
-// Watchdog and error handling
-extern "C" void app_main() {
-  // This function is called by ESP-IDF
-  // Arduino setup() and loop() are called from here
-  initArduino();
-  setup();
-  for(;;) {
-    loop();
-    if (serialEventRun) serialEventRun();
-  }
+  // In a real application, you might want to restart or enter safe mode
 }

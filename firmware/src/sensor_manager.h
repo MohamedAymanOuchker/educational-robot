@@ -1,6 +1,7 @@
 #ifndef SENSOR_MANAGER_H
 #define SENSOR_MANAGER_H
 
+#include <Arduino.h>
 #include "types.h"
 #include "config.h"
 #include <MPU6050.h>
