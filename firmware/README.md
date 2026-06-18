@@ -101,6 +101,13 @@ Commands are sent via BLE in the format: `<TYPE><VALUE>`
 | S | Stop | `STOP` |
 | A | Auto mode | `AUTO_NAV` |
 | C | Recalibrate IMU | `CALIBRATE` |
+| K | Closed-loop turns on/off (experimental) | `CLOOP_ON` / `CLOOP_OFF` |
+
+> **Closed-loop turning is experimental and off by default.** When enabled
+> (`CLOOP_ON`), turns use MPU6050 yaw feedback instead of open-loop step
+> counting. It has not been validated on hardware — verify the turn direction
+> and convergence on the robot, and flip the direction mapping in
+> `rotateRobotClosedLoop()` if it turns the wrong way.
 
 ## 📊 Telemetry Data
 

@@ -16,6 +16,7 @@ SensorManager::SensorManager()
     axOffset(0), ayOffset(0), azOffset(0),
     gxOffset(0), gyOffset(0), gzOffset(0),
     ultrasonicMutex(nullptr),
+    imuMutex(nullptr),
     recalibrateRequested(false) {
 }
 
@@ -28,6 +29,12 @@ void SensorManager::begin() {
   ultrasonicMutex = xSemaphoreCreateMutex();
   if (ultrasonicMutex == nullptr) {
     Serial.println("Warning: failed to create ultrasonic mutex");
+  }
+
+  // Guard for cross-core IMU access (sensor task vs closed-loop turn)
+  imuMutex = xSemaphoreCreateMutex();
+  if (imuMutex == nullptr) {
+    Serial.println("Warning: failed to create IMU mutex");
   }
 
   // Seed a sane temperature so the first distance calc has a valid value
@@ -198,28 +205,44 @@ bool SensorManager::isObstacleDetected() const {
   return currentDistance < MIN_OBSTACLE_DIST;
 }
 
-void SensorManager::updateYaw() {
+void SensorManager::integrateYaw() {
+  // Caller must hold imuMutex (touches the IMU over I2C).
   unsigned long now = millis();
-  
+
   if (now - lastIMUUpdate < IMU_UPDATE_RATE) {
     return; // Update rate limiting
   }
-  
+
   int16_t gx, gy, gz;
   imu.getRotation(&gx, &gy, &gz);
-  
+
   // Apply calibration offset
   gz -= gzOffset;
-  
+
   float dt = (now - lastIMUUpdate) / 1000.0;
   lastIMUUpdate = now;
-  
+
   // Simple gyroscope integration
   yaw += (gz / 131.0) * dt; // 131.0 LSB/°/s for ±250°/s range
-  
+
   // Normalize yaw to 0-360 degrees
   if (yaw > 360.0) yaw -= 360.0;
   if (yaw < 0.0) yaw += 360.0;
+}
+
+void SensorManager::updateYaw() {
+  if (imuMutex != nullptr) xSemaphoreTake(imuMutex, portMAX_DELAY);
+  integrateYaw();
+  if (imuMutex != nullptr) xSemaphoreGive(imuMutex);
+}
+
+float SensorManager::sampleYaw() {
+  // Thread-safe fresh yaw read for closed-loop turns on the motor task.
+  if (imuMutex != nullptr) xSemaphoreTake(imuMutex, portMAX_DELAY);
+  integrateYaw();
+  float result = yaw;
+  if (imuMutex != nullptr) xSemaphoreGive(imuMutex);
+  return result;
 }
 
 void SensorManager::updateIMU() {
@@ -236,7 +259,10 @@ void SensorManager::resetYaw() {
 }
 
 float SensorManager::getTemperature() {
+  // Guarded: shares the IMU/I2C bus with sampleYaw() on the motor task
+  if (imuMutex != nullptr) xSemaphoreTake(imuMutex, portMAX_DELAY);
   int16_t rawTemp = imu.getTemperature();
+  if (imuMutex != nullptr) xSemaphoreGive(imuMutex);
   return rawTemp / 340.0 + 36.53; // MPU6050 temperature formula
 }
 

@@ -14,6 +14,7 @@ MotorControl motorController;
 MotorControl::MotorControl()
   : currentSpeed(DEFAULT_SPEED),
     stopRequested(false),
+    closedLoopEnabled(CLOSED_LOOP_TURN_DEFAULT),
     wheelCircumference(PI * WHEEL_DIAMETER) {
 }
 
@@ -135,10 +136,15 @@ void MotorControl::rotateRight(float degrees) {
 }
 
 void MotorControl::rotateRobot(float degrees) {
+  if (closedLoopEnabled) {
+    rotateRobotClosedLoop(degrees);
+    return;
+  }
+
   int steps = angleToSteps(degrees);
-  
+
   Serial.printf("Rotating %.1f degrees (%d steps)\n", degrees, steps);
-  
+
   // Set direction pins
   digitalWrite(LEFT_DIR_PIN, degrees > 0 ? HIGH : LOW);
   digitalWrite(RIGHT_DIR_PIN, degrees > 0 ? LOW : HIGH);
@@ -157,6 +163,52 @@ void MotorControl::rotateRobot(float degrees) {
     digitalWrite(LEFT_STEP_PIN, LOW);
     digitalWrite(RIGHT_STEP_PIN, LOW);
     delayMicroseconds(currentSpeed);
+  }
+}
+
+void MotorControl::rotateRobotClosedLoop(float degrees) {
+  // EXPERIMENTAL / UNVALIDATED ON HARDWARE.
+  // Bang-bang controller: step toward an IMU yaw target until within
+  // TURN_TOLERANCE_DEG. Reads fresh yaw via the thread-safe sampleYaw().
+  float start = sensorManager.sampleYaw();
+  float target = start + degrees;
+  while (target >= 360.0) target -= 360.0;
+  while (target < 0.0) target += 360.0;
+
+  Serial.printf("Closed-loop turn %.1f deg (target heading %.1f)\n", degrees, target);
+
+  unsigned long startMs = millis();
+
+  while (!stopRequested && (millis() - startMs < TURN_TIMEOUT_MS)) {
+    float yaw = sensorManager.sampleYaw();
+
+    // Shortest signed error in [-180, 180]
+    float error = target - yaw;
+    while (error > 180.0) error -= 360.0;
+    while (error < -180.0) error += 360.0;
+
+    if (fabs(error) <= TURN_TOLERANCE_DEG) {
+      break; // converged
+    }
+
+    // NOTE: the mapping of error sign to motor direction depends on how the
+    // gyro and motors are wired; verify/flip on hardware if it turns the
+    // wrong way. error > 0 => increase heading => turn right (degrees > 0).
+    digitalWrite(LEFT_DIR_PIN, error > 0 ? HIGH : LOW);
+    digitalWrite(RIGHT_DIR_PIN, error > 0 ? LOW : HIGH);
+
+    for (int s = 0; s < TURN_STEP_BATCH && !stopRequested; s++) {
+      digitalWrite(LEFT_STEP_PIN, HIGH);
+      digitalWrite(RIGHT_STEP_PIN, HIGH);
+      delayMicroseconds(currentSpeed);
+      digitalWrite(LEFT_STEP_PIN, LOW);
+      digitalWrite(RIGHT_STEP_PIN, LOW);
+      delayMicroseconds(currentSpeed);
+    }
+  }
+
+  if (millis() - startMs >= TURN_TIMEOUT_MS) {
+    Serial.println("Closed-loop turn timed out before converging");
   }
 }
 
@@ -206,6 +258,15 @@ void MotorControl::setSpeed(int speed) {
   } else {
     Serial.println("Invalid speed value. Must be between 200-1000 microseconds");
   }
+}
+
+void MotorControl::setClosedLoop(bool enabled) {
+  closedLoopEnabled = enabled;
+  Serial.printf("Closed-loop turning %s\n", enabled ? "ENABLED (experimental)" : "disabled");
+}
+
+bool MotorControl::isClosedLoop() const {
+  return closedLoopEnabled;
 }
 
 int MotorControl::getSpeed() const {

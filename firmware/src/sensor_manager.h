@@ -25,6 +25,13 @@ private:
   // (core 0) and the motor/navigation task (core 1) during autonomy.
   SemaphoreHandle_t ultrasonicMutex;
 
+  // Serializes IMU/I2C access so the motor task can sample fresh yaw during a
+  // closed-loop turn while the sensor task is also reading the IMU.
+  SemaphoreHandle_t imuMutex;
+
+  // Gyro yaw integration without locking (callers hold imuMutex).
+  void integrateYaw();
+
   // Set from the motor task; the sensor task services it so all IMU/I2C
   // access stays on a single core.
   volatile bool recalibrateRequested;
@@ -54,6 +61,7 @@ public:
   // IMU functions
   void updateIMU();
   void updateYaw();
+  float sampleYaw();   // integrate + return fresh yaw (thread-safe; for closed-loop turns)
   float getYaw() const;
   float getTemperature();
   void resetYaw();

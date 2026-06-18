@@ -10,10 +10,13 @@ private:
   // Set from the BLE task to abort an in-progress blocking move. volatile
   // because it is written and read from different FreeRTOS tasks/cores.
   volatile bool stopRequested;
+  // When true, rotateRobot() uses IMU feedback instead of open-loop steps.
+  bool closedLoopEnabled;
   const float wheelCircumference;
 
   int distanceToSteps(int distanceCM);
   int angleToSteps(float degrees);
+  void rotateRobotClosedLoop(float degrees);
 
 public:
   MotorControl();
@@ -37,6 +40,8 @@ public:
   bool isStopPending() const; // true while an abort is outstanding
   void setSpeed(int speed);
   int getSpeed() const;
+  void setClosedLoop(bool enabled);   // toggle IMU-based turning (experimental)
+  bool isClosedLoop() const;
   
   // Safety functions
   bool checkObstacle();

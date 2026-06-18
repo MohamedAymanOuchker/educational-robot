@@ -3,7 +3,7 @@
 
 // Command structure for BLE communication
 struct Command {
-  char type;    // F, B, L, R, S, A, C (Forward, Backward, Left, Right, Stop, Auto, Calibrate)
+  char type;    // F,B,L,R,S,A,C,K (Forward,Backward,Left,Right,Stop,Auto,Calibrate,closed-loop)
   int value;    // Parameter value (distance in cm, angle in degrees)
 };
 
