@@ -12,7 +12,6 @@ private:
   volatile bool stopRequested;
   const float wheelCircumference;
 
-  void stepMotor(int steps, int stepPin, int dirPin, bool direction);
   int distanceToSteps(int distanceCM);
   int angleToSteps(float degrees);
 

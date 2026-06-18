@@ -40,6 +40,7 @@
 // Task Configuration
 #define MOTOR_TASK_STACK    10000
 #define SENSOR_TASK_STACK   10000
+#define COMM_TASK_STACK     4096
 #define COMMAND_QUEUE_SIZE  10
 
 // Timing Constants

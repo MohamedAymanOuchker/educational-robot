@@ -29,16 +29,18 @@ ESP32-based firmware for the educational robot platform with advanced autonomy a
 
 ```
 firmware/
-├── arduino_main.ino     # Legacy Arduino sketch
 ├── platformio.ini       # PlatformIO config
-└── src/
-    ├── main.cpp        # Main program entry
-    ├── config.h        # Configuration & pins
-    ├── types.h         # Data structures
-    ├── ble_communication.*  # BLE handling
-    ├── motor_control.*      # Motor functions
-    ├── navigation.*         # Path planning
-    └── sensor_manager.*     # Sensor interface
+├── src/                 # Primary firmware (built by PlatformIO)
+│   ├── main.cpp        # Main program entry
+│   ├── config.h        # Configuration & pins
+│   ├── types.h         # Data structures
+│   ├── ble_communication.*  # BLE handling
+│   ├── motor_control.*      # Motor functions
+│   ├── navigation.*         # Path planning
+│   └── sensor_manager.*     # Sensor interface
+└── legacy/
+    └── arduino_main/   # Single-file Arduino IDE sketch (archived)
+        └── arduino_main.ino
 ```
 
 ## ⚙️ Building & Uploading
@@ -55,8 +57,8 @@ pio run --target upload
 pio device monitor
 ```
 
-Using Arduino IDE:
-1. Open arduino_main.ino
+Using Arduino IDE (legacy single-file sketch):
+1. Open legacy/arduino_main/arduino_main.ino
 2. Select "ESP32 Dev Module" board
 3. Set upload speed to 921600
 4. Click Upload

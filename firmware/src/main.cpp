@@ -92,7 +92,7 @@ void setup() {
   xTaskCreatePinnedToCore(
     communicationTask,           // Task function
     "CommTask",                 // Task name
-    4096,                       // Stack size
+    COMM_TASK_STACK,            // Stack size
     NULL,                       // Parameters
     1,                          // Priority (medium)
     &communicationTaskHandle,   // Task handle
