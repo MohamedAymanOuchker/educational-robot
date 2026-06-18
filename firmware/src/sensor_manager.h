@@ -38,6 +38,10 @@ public:
   float getYaw() const;
   float getTemperature();
   void resetYaw();
+
+  // Battery monitoring
+  float readBatteryVoltage();
+  float readBatteryPercent();
   
   // Data management
   void updateSensorData();

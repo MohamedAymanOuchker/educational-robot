@@ -41,16 +41,17 @@ bool SensorManager::initializeIMU() {
   }
   
   Serial.println("IMU connected successfully");
-  
-  // Optional: Calibrate IMU
-  // calibrateIMU();
-  
+
+  // Calibrate the gyro bias at boot so yaw integration does not drift.
+  // The robot must be kept still during this.
+  calibrateIMU();
+
   return true;
 }
 
 void SensorManager::calibrateIMU() {
-  Serial.println("Calibrating IMU... Keep robot still for 10 seconds");
-  
+  Serial.println("Calibrating IMU... Keep robot still for ~3 seconds");
+
   long axSum = 0, aySum = 0, azSum = 0;
   long gxSum = 0, gySum = 0, gzSum = 0;
   const int samples = 1000;
@@ -153,12 +154,30 @@ float SensorManager::getTemperature() {
   return rawTemp / 340.0 + 36.53; // MPU6050 temperature formula
 }
 
+float SensorManager::readBatteryVoltage() {
+  // analogReadMilliVolts() applies the ESP32's factory ADC calibration,
+  // which is far more accurate than a raw analogRead() conversion.
+  uint32_t pinMilliVolts = analogReadMilliVolts(BATTERY_PIN);
+  return (pinMilliVolts / 1000.0) * BATTERY_DIVIDER_RATIO;
+}
+
+float SensorManager::readBatteryPercent() {
+  float voltage = readBatteryVoltage();
+  float percent = (voltage - BATTERY_MIN_VOLTAGE) /
+                  (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE) * 100.0;
+
+  // Clamp to a valid 0-100 range
+  if (percent > 100.0) percent = 100.0;
+  if (percent < 0.0) percent = 0.0;
+  return percent;
+}
+
 void SensorManager::updateSensorData() {
   sensorData.distance = readDistanceCM();
   updateIMU();
   sensorData.heading = yaw;
   sensorData.temperature = getTemperature();
-  sensorData.batteryLevel = 100.0; // TODO: Implement actual battery monitoring
+  sensorData.batteryLevel = readBatteryPercent();
   sensorData.timestamp = millis();
 }
 

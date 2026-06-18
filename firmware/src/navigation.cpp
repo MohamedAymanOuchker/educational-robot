@@ -92,17 +92,22 @@ float Navigation::findBestPath() {
   float bestAngle = -999; // Invalid angle indicates no good path
   
   Serial.println("Scanning for best path...");
-  
-  // Scan from left to right
+
+  // rotateRobot() turns RELATIVE to the current heading, so we track the
+  // chassis heading (relative to center) and only ever turn by the delta.
+  // This sweeps left-to-right across the arc instead of spinning in place.
+  int currentHeading = 0;
+
   for (int angle = SCAN_ANGLE_START; angle <= SCAN_ANGLE_END; angle += SCAN_ANGLE_STEP) {
-    // Turn to scan angle
-    motorController.rotateRobot(angle);
+    // Turn by the difference between where we are and the target scan angle
+    motorController.rotateRobot(angle - currentHeading);
+    currentHeading = angle;
     delay(100); // Stabilization time
-    
+
     // Take multiple readings for accuracy
     float totalDistance = 0;
     int validReadings = 0;
-    
+
     for (int i = 0; i < 3; i++) {
       float distance = sensorManager.readDistanceCM();
       if (distance < MAX_DISTANCE) {
@@ -111,27 +116,27 @@ float Navigation::findBestPath() {
       }
       delay(50);
     }
-    
+
     if (validReadings == 0) continue;
-    
+
     float avgDistance = totalDistance / validReadings;
     float score = calculateScore(avgDistance, angle);
-    
-    Serial.printf("Angle: %d°, Distance: %.1f cm, Score: %.2f\n", 
+
+    Serial.printf("Angle: %d°, Distance: %.1f cm, Score: %.2f\n",
                   angle, avgDistance, score);
-    
+
     if (score > bestScore) {
       bestScore = score;
       bestAngle = angle;
     }
-    
+
     // Update path memory
     updatePathMemory(avgDistance, angle);
   }
-  
-  // Return to original position
-  motorController.rotateRobot(SCAN_ANGLE_START * -1); // Return to center
-  
+
+  // Return to center by undoing the net rotation accumulated during the scan
+  motorController.rotateRobot(-currentHeading);
+
   Serial.printf("Best path: %.1f° (score: %.2f)\n", bestAngle, bestScore);
   return bestAngle;
 }
