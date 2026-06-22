@@ -51,18 +51,17 @@ This project bridges the gap between simple toy robots and expensive educational
 
 - [**Assembly Guide**](docs/assembly-guide.md) - Step-by-step hardware build
 - [**User Manual**](docs/user-manual.md) - How to use the system
-- [**Development Setup**](docs/development-setup.md) - For contributors
-- [**Curriculum Guide**](curriculum/README.md) - Educational activities
+- [**Curriculum Guide**](docs/curriculum-guide.md) - Educational activities
+- [**Research & Evaluation**](docs/research-documentation.md) - Study results
 
 ## 🏗️ Project Structure
 
 ```
 ├── hardware/          # CAD files, STL models, schematics
-├── firmware/          # ESP32 Arduino code
+├── firmware/          # ESP32 Arduino code (PlatformIO)
 ├── mobile-app/        # Flutter application
-├── curriculum/        # Educational materials
-├── docs/             # Documentation and guides
-└── research/         # Studies and evaluation results
+├── docs/              # All documentation, guides, and research
+└── .github/           # CI/CD workflows
 ```
 
 ## 📋 Bill of Materials

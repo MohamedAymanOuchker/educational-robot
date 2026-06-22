@@ -1,9 +1,0 @@
-Analyzing mobile-app...                                         
-
-  error - The name 'CodeScreen' isn't a class - lib\main.dart:141:11 - creation_with_non_type
-   info - 'name' is deprecated and shouldn't be used. Use platformName instead - lib\screens\connect_screen.dart:123:59 - deprecated_member_use
-warning - The left operand can't be null, so the right operand is never executed - lib\screens\connect_screen.dart:123:67 - dead_null_aware_expression
-warning - The operand can't be 'null', so the condition is always 'true' - lib\widgets\block_editor\block_editor_widget.dart:289:70 - unnecessary_null_comparison
-  error - 4 positional arguments expected by 'translateByDouble', but 3 found - lib\widgets\block_editor\block_widget.dart:101:70 - not_enough_positional_arguments
-warning - The operand can't be 'null', so the condition is always 'true' - lib\widgets\block_editor\block_widget.dart:293:60 - unnecessary_null_comparison
-

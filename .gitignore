@@ -29,3 +29,13 @@ Thumbs.db
 # Personal
 secrets.h
 config_local.h
+
+# Temp / generated output files (do not commit)
+mobile-app/*.txt
+mobile-app/analysis_results.txt
+mobile-app/devices.txt
+mobile-app/emulators.txt
+mobile-app/final_analysis.txt
+
+# IEEE paper — kept local only
+paper/
