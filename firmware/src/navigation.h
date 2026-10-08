@@ -3,11 +3,12 @@
 
 #include "types.h"
 #include "config.h"
+#include <atomic>
 
 class Navigation {
 private:
   // State
-  bool isAutonomousMode;
+  std::atomic<bool> isAutonomousMode;
   unsigned long lastNavigationUpdate;
   float lastBestAngle;
   int stuckCounter;
@@ -22,6 +23,7 @@ private:
   bool hasRecentPath(float angle, float tolerance);
   void updatePathMemory(float distance, float angle);
   void clearPathMemory();
+  void failAutonomous(const char* reason);
 
   // Recovery maneuvers
   void emergencyManeuver();

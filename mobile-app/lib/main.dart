@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -32,12 +33,11 @@ class RoboCodeApp extends StatelessWidget {
         primarySwatch: Colors.indigo,
         brightness: Brightness.light,
         scaffoldBackgroundColor: Colors.blue[50],
-        textTheme: GoogleFonts.comicNeueTextTheme(
-          Theme.of(context).textTheme,
-        ).apply(
-          bodyColor: Colors.indigo[900],
-          displayColor: Colors.indigo[900],
-        ),
+        textTheme: GoogleFonts.comicNeueTextTheme(Theme.of(context).textTheme)
+            .apply(
+              bodyColor: Colors.indigo[900],
+              displayColor: Colors.indigo[900],
+            ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.indigo,
           elevation: 0,
@@ -88,12 +88,13 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
   int _selectedIndex = 0;
   late TabController _tabController;
   RobotService? _robotService;
+  StreamSubscription<ConnectionStatus>? _connectionSubscription;
   bool _isConnected = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
         setState(() {
@@ -110,7 +111,8 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
     _robotService = Provider.of<RobotService>(context, listen: false);
 
     // Listen to connection status changes
-    _robotService!.connectionStatus.listen((status) {
+    _connectionSubscription = _robotService!.connectionStatus.listen((status) {
+      if (!mounted) return;
       setState(() {
         _isConnected = status == ConnectionStatus.connected;
       });
@@ -119,8 +121,7 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
       final appState = Provider.of<AppState>(context, listen: false);
       String robotName = '';
       if (_isConnected && _robotService!.connectedBluetoothDevice != null) {
-        robotName =
-            _robotService!.connectedBluetoothDevice!.platformName;
+        robotName = _robotService!.connectedBluetoothDevice!.platformName;
       }
       appState.updateConnectionStatus(_isConnected, robotName: robotName);
     });
@@ -131,6 +132,7 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
 
   @override
   void dispose() {
+    _connectionSubscription?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -139,29 +141,6 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
     const HomeScreen(),
     const ConnectScreen(),
     const CodeScreen(),
-    Container(
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.play_circle_outline,
-              size: 64,
-              color: Colors.grey,
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Use the Code Screen to build and run your program',
-              style: GoogleFonts.comicNeue(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    ),
     const SensorsScreen(),
   ];
 
@@ -220,7 +199,7 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
           preferredSize: const Size.fromHeight(6.0),
           child: Consumer<AppState>(
             builder: (context, appState, child) => LinearProgressIndicator(
-              value: appState.completedLevels.length / 5.0,
+              value: appState.progressPercentage,
               backgroundColor: Colors.indigo[300],
               valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
             ),
@@ -277,10 +256,6 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
               label: 'Code',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.play_circle_rounded, size: 32),
-              label: 'Run',
-            ),
-            BottomNavigationBarItem(
               icon: Stack(
                 children: [
                   Icon(Icons.dashboard_rounded, size: 32),
@@ -309,9 +284,7 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
             fontWeight: FontWeight.bold,
             fontSize: 14,
           ),
-          unselectedLabelStyle: GoogleFonts.comicNeue(
-            fontSize: 14,
-          ),
+          unselectedLabelStyle: GoogleFonts.comicNeue(fontSize: 14),
           onTap: onItemTapped,
         ),
       ),
@@ -333,11 +306,18 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _buildHelpItem(
-                            'Connect to your robot in the Connect tab'),
-                        _buildHelpItem('Drag blocks from the left toolbox'),
-                        _buildHelpItem('Connect blocks to create sequences'),
+                          'Connect to your robot in the Connect tab',
+                        ),
+                        _buildHelpItem(
+                          'Hold and drag a toolbox block into the workspace',
+                        ),
+                        _buildHelpItem(
+                          'Arrange blocks from top to bottom; tap a block to edit it',
+                        ),
                         _buildHelpItem('Click Run to test on your robot'),
-                        _buildHelpItem('Save your program when it works!'),
+                        _buildHelpItem(
+                          'Use Save and Open to keep programs on this device',
+                        ),
                       ],
                     ),
                     actions: [
@@ -385,10 +365,7 @@ class RoboCodeHomePageState extends State<RoboCodeHomePage>
           const Icon(Icons.star, color: Colors.orange, size: 20),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              text,
-              style: GoogleFonts.comicNeue(fontSize: 16),
-            ),
+            child: Text(text, style: GoogleFonts.comicNeue(fontSize: 16)),
           ),
         ],
       ),

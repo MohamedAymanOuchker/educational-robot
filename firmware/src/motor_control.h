@@ -1,58 +1,48 @@
 #ifndef MOTOR_CONTROL_H
 #define MOTOR_CONTROL_H
 
+#include <Arduino.h>
+#include <freertos/FreeRTOS.h>
 #include "types.h"
 #include "config.h"
 
 class MotorControl {
 private:
   int currentSpeed;
-  // Set from the BLE task to abort an in-progress blocking move. volatile
-  // because it is written and read from different FreeRTOS tasks/cores.
-  volatile bool stopRequested;
-  // When true, rotateRobot() uses IMU feedback instead of open-loop steps.
-  bool closedLoopEnabled;
+  // Gate, generation and coil writes share one critical section across cores.
+  mutable portMUX_TYPE motionMux = portMUX_INITIALIZER_UNLOCKED;
+  bool stopRequested;
+  uint32_t generation;
+  int leftPhase;
+  int rightPhase;
   const float wheelCircumference;
-
   int distanceToSteps(int distanceCM);
   int angleToSteps(float degrees);
-  void rotateRobotClosedLoop(float degrees);
+  bool stepPair(int leftDirection, int rightDirection);
+  MotionResult runSteps(int steps, int leftDirection, int rightDirection, bool checkFront);
+  void releaseCoilsUnlocked();
 
 public:
   MotorControl();
-  
-  // Basic movement functions
-  void moveForward(int distanceCM);
-  void moveBackward(int distanceCM);
-  void rotateLeft(float degrees);
-  void rotateRight(float degrees);
-  void rotateRobot(float degrees);
-  
-  // Advanced movement functions
-  void moveForwardSteps(int steps);
-  void moveBackwardSteps(int steps);
-  
-  // Control functions
+  MotionResult moveForward(int distanceCM);
+  MotionResult moveBackward(int distanceCM);
+  MotionResult rotateLeft(float degrees);
+  MotionResult rotateRight(float degrees);
+  MotionResult rotateRobot(float degrees);
+  MotionResult moveForwardSteps(int steps);
+  MotionResult moveBackwardSteps(int steps);
   void stopMoving();
   void emergencyStop();
-  void requestStop();        // ask an in-progress move to abort (non-blocking)
-  void clearStop();          // re-arm motion for the next command
-  bool isStopPending() const; // true while an abort is outstanding
+  void requestStop();
+  bool arm(uint32_t expectedGeneration);
+  uint32_t getGeneration() const;
+  bool isStopPending() const;
   void setSpeed(int speed);
   int getSpeed() const;
-  void setClosedLoop(bool enabled);   // toggle IMU-based turning (experimental)
-  bool isClosedLoop() const;
-  
-  // Safety functions
   bool checkObstacle();
-  void enableMotors();
-  void disableMotors();
-  
-  // Initialization
+  void releaseCoils();
   void begin();
 };
 
-// Global motor control instance
 extern MotorControl motorController;
-
-#endif // MOTOR_CONTROL_H
+#endif

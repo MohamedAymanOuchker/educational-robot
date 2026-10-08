@@ -1,6 +1,7 @@
 #include "navigation.h"
 #include "motor_control.h"
 #include "sensor_manager.h"
+#include "ble_communication.h"
 #include <Arduino.h>
 #include <cmath>
 
@@ -9,10 +10,10 @@ Navigation navigator;
 
 Navigation::Navigation() 
   : isAutonomousMode(false),
-    pathIndex(0),
     lastNavigationUpdate(0),
     lastBestAngle(0),
-    stuckCounter(0) {
+    stuckCounter(0),
+    pathIndex(0) {
   
   // Initialize path memory
   clearPathMemory();
@@ -26,6 +27,7 @@ void Navigation::begin() {
 }
 
 void Navigation::enableAutonomousMode() {
+  if (motorController.isStopPending()) return;
   isAutonomousMode = true;
   clearPathMemory();
   stuckCounter = 0;
@@ -35,16 +37,22 @@ void Navigation::enableAutonomousMode() {
 
 void Navigation::disableAutonomousMode() {
   isAutonomousMode = false;
-  motorController.stopMoving();
   Serial.println("Autonomous navigation disabled");
 }
 
 bool Navigation::isAutonomous() const {
-  return isAutonomousMode;
+  return isAutonomousMode.load() && !motorController.isStopPending();
+}
+
+void Navigation::failAutonomous(const char* reason) {
+  // A user STOP is cancellation, not an autonomous sensor fault.
+  if (!isAutonomous()) return;
+  bleManager.stopAll(reason);
+  bleManager.sendFault(reason);
 }
 
 void Navigation::executeAutonomousStep() {
-  if (!isAutonomousMode) return;
+  if (!isAutonomous()) return;
   
   // Rate limiting - update every 500ms
   if (millis() - lastNavigationUpdate < 500) {
@@ -52,26 +60,34 @@ void Navigation::executeAutonomousStep() {
   }
   lastNavigationUpdate = millis();
   
-  float currentDistance = sensorManager.getCurrentDistance();
+  const SensorData data = sensorManager.getSensorData();
+  if (!data.distanceValid) {
+    failAutonomous("autonomy stopped: distance unavailable or stale");
+    return;
+  }
+  const float currentDistance = data.distance;
   
-  // Emergency reverse if too close
+  // With no rear sensor, fail closed rather than blindly reversing.
   if (currentDistance < CRITICAL_DISTANCE) {
     Serial.println("Emergency maneuver: Too close to obstacle");
-    emergencyManeuver();
+    failAutonomous("autonomy stopped: obstacle too close");
     return;
   }
   
   // Continue forward if path is clear
-  if (currentDistance > MIN_OBSTACLE_DIST * 2) {
-    motorController.moveForward(10); // Small forward step
+  if (currentDistance > MIN_OBSTACLE_DIST) {
+    if (motorController.moveForward(1) != MotionResult::Done) {
+      failAutonomous("autonomy forward motion failed");
+    }
     stuckCounter = 0; // Reset stuck counter
     return;
   }
   
   // Obstacle detected - find new path
-  if (currentDistance < MIN_OBSTACLE_DIST) {
+  if (currentDistance <= MIN_OBSTACLE_DIST) {
     float bestAngle = findBestPath();
     
+    if (!isAutonomous()) return;
     if (bestAngle != -999) {
       Serial.printf("Turning to best angle: %.1f degrees\n", bestAngle);
       motorController.rotateRobot(bestAngle);
@@ -106,7 +122,7 @@ float Navigation::findBestPath() {
     }
 
     // Turn by the difference between where we are and the target scan angle
-    motorController.rotateRobot(angle - currentHeading);
+    if (motorController.rotateRobot(angle - currentHeading) != MotionResult::Done) return -999;
     currentHeading = angle;
     delay(100); // Stabilization time
 
@@ -116,7 +132,11 @@ float Navigation::findBestPath() {
 
     for (int i = 0; i < 3; i++) {
       float distance = sensorManager.readDistanceCM();
-      if (distance < MAX_DISTANCE) {
+      if (!std::isfinite(distance)) {
+        failAutonomous("autonomy scan stopped: distance unavailable");
+        return -999;
+      }
+      if (std::isfinite(distance)) {
         totalDistance += distance;
         validReadings++;
       }
@@ -136,12 +156,13 @@ float Navigation::findBestPath() {
       bestAngle = angle;
     }
 
-    // Update path memory
-    updatePathMemory(avgDistance, angle);
+    // Do not add candidate headings during scoring: that penalized adjacent
+    // candidates in the same sweep and biased every clear scan to the left.
   }
 
   // Return to center by undoing the net rotation accumulated during the scan
-  motorController.rotateRobot(-currentHeading);
+  if (motorController.rotateRobot(-currentHeading) != MotionResult::Done) return -999;
+  if (bestAngle != -999) updatePathMemory(bestScore, bestAngle);
 
   Serial.printf("Best path: %.1f° (score: %.2f)\n", bestAngle, bestScore);
   return bestAngle;
@@ -202,50 +223,12 @@ void Navigation::clearPathMemory() {
 }
 
 void Navigation::emergencyManeuver() {
-  Serial.println("Executing emergency maneuver");
-  
-  // Stop immediately
-  motorController.stopMoving();
-  delay(100);
-  
-  // Back up
-  motorController.moveBackward(15);
-  delay(200);
-  
-  // Turn around (180 degrees with some randomness)
-  int turnAngle = 160 + random(-20, 20); // 140-180 degrees
-  motorController.rotateRobot(turnAngle);
-  
-  stuckCounter = 0;
+  failAutonomous("autonomy stopped: obstacle too close");
 }
 
 void Navigation::avoidStuckSituation() {
-  Serial.println("Robot appears stuck, executing avoidance maneuver");
-  
-  // Random maneuver to break out of stuck situation
-  int maneuver = random(0, 3);
-  
-  switch (maneuver) {
-    case 0:
-      // Sharp turn and move
-      motorController.rotateRobot(90 + random(-30, 30));
-      motorController.moveForward(20);
-      break;
-      
-    case 1:
-      // Back up and turn
-      motorController.moveBackward(20);
-      motorController.rotateRobot(135 + random(-45, 45));
-      break;
-      
-    case 2:
-      // Full 180 turn
-      performUTurn();
-      break;
-  }
-  
-  clearPathMemory(); // Clear memory to avoid repeated patterns
-  stuckCounter = 0;
+  // No rear/side range sensor: ask for human intervention instead of blind recovery.
+  failAutonomous("autonomy stopped: no clear path");
 }
 
 void Navigation::performUTurn() {

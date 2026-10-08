@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'block_types.dart';
 
+/// Only the workspace positions roots; nested blocks use normal Column layout.
 class BlockWidget extends StatefulWidget {
   final Block block;
   final VoidCallback? onTap;
@@ -11,231 +11,97 @@ class BlockWidget extends StatefulWidget {
   final Function(Block)? onBlockUnsnapped;
 
   const BlockWidget({
-    Key? key,
+    super.key,
     required this.block,
     this.onTap,
     this.isDraggable = true,
     this.onPositionChanged,
     this.onBlockSnapped,
     this.onBlockUnsnapped,
-  }) : super(key: key);
+  });
 
   @override
-  _BlockWidgetState createState() => _BlockWidgetState();
+  State<BlockWidget> createState() => _BlockWidgetState();
 }
 
 class _BlockWidgetState extends State<BlockWidget> {
-  bool _isDragging = false;
-
   @override
   Widget build(BuildContext context) {
-    final blockContent = Container(
-      constraints: BoxConstraints(maxWidth: 300),
-      decoration: BoxDecoration(
-        color: widget.block.color,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(8),
-          topRight: Radius.circular(8),
-          bottomLeft: Radius.circular(widget.block.isContainer ? 0 : 8),
-          bottomRight: Radius.circular(widget.block.isContainer ? 0 : 8),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-            offset: Offset(0, 2),
+    final content = Material(
+      color: widget.block.color,
+      elevation: 2,
+      borderRadius: BorderRadius.circular(8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () {
+              widget.onTap?.call();
+              if (widget.isDraggable) _editParameters(context);
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: _buildBlockHeader(),
           ),
+          if (widget.block.isContainer && widget.isDraggable)
+            _buildContainerBody(),
         ],
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            if (widget.onTap != null) {
-              widget.onTap!();
-            }
-            // Only allow parameter editing if block is draggable (in workspace)
-            if (widget.isDraggable) {
-              _editParameters(context);
-            }
-          },
-          borderRadius: BorderRadius.circular(8),
-          child: Container(
-            constraints: BoxConstraints(maxWidth: 300),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildBlockHeader(),
-                if (widget.block.isContainer) _buildContainerBody(),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
-
-    if (!widget.isDraggable) {
-      return blockContent;
-    }
-
-    return Positioned(
-      left: widget.block.position.dx,
-      top: widget.block.position.dy,
-      child: SizedBox(
-        width: 300,
-        child: GestureDetector(
-          onPanStart: (_) => setState(() => _isDragging = true),
-          onPanUpdate: (details) {
-            setState(() {
-              widget.block.position += details.delta;
-              if (widget.onPositionChanged != null) {
-                widget.onPositionChanged!(widget.block.position);
-              }
-            });
-          },
-          onPanEnd: (_) => setState(() => _isDragging = false),
-          child: AnimatedContainer(
-            duration: Duration(milliseconds: 200),
-            transform: Matrix4.identity()
-              ..translateByDouble(_isDragging ? -10.0 : 0.0, 0.0, 0.0, 0.0),
-            child: blockContent,
-          ),
-        ),
+    if (!widget.isDraggable) return content;
+    return Draggable<Block>(
+      data: widget.block,
+      maxSimultaneousDrags: 1,
+      feedback: Material(
+        elevation: 4,
+        borderRadius: BorderRadius.circular(8),
+        color: widget.block.color,
+        child: SizedBox(width: 280, child: _buildBlockHeader()),
       ),
+      childWhenDragging: Opacity(opacity: 0.35, child: content),
+      child: content,
     );
   }
 
   Future<void> _editParameters(BuildContext context) async {
-    if (widget.block.type == BlockType.ifDistance) {
-      final controller = TextEditingController(
-          text: widget.block.parameters['distance']?.toString() ?? '20');
-
-      final result = await showDialog<int>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(
-            'Set Distance Threshold',
-            style: GoogleFonts.comicNeue(
-              fontWeight: FontWeight.bold,
-              fontSize: 20,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'How close can objects get?',
-                style: GoogleFonts.comicNeue(fontSize: 16),
-              ),
-              SizedBox(height: 16),
-              TextField(
-                controller: controller,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'Distance in cm',
-                  hintText: '1-200',
-                  border: OutlineInputBorder(),
-                  suffixText: 'cm',
-                ),
-                style: GoogleFonts.comicNeue(fontSize: 18),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                final value = int.tryParse(controller.text);
-                if (value != null && value > 0 && value <= 200) {
-                  Navigator.pop(context, value);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Please enter a number between 1 and 200'),
-                      backgroundColor: Colors.orange,
-                    ),
-                  );
-                }
-              },
-              child: Text('OK'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-              ),
-            ),
-          ],
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-      );
-
-      if (result != null) {
-        setState(() {
-          widget.block.parameters['distance'] = result;
-        });
-      }
-    }
-
-    // Add similar dialogs for other block types
-    else if (widget.block.type == BlockType.moveForward ||
-        widget.block.type == BlockType.moveBackward) {
-      // Similar dialog for distance parameter
-    } else if (widget.block.type == BlockType.turnLeft ||
-        widget.block.type == BlockType.turnRight) {
-      // Similar dialog for angle parameter
-    } else if (widget.block.type == BlockType.wait) {
-      // Similar dialog for time parameter
+    final parameter = BlockParameter.forType(widget.block.type);
+    if (parameter == null) return;
+    final result = await showDialog<int>(
+      context: context,
+      builder: (_) => _ParameterDialog(
+        parameter: parameter,
+        value: widget.block.parameters[parameter.key],
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() => widget.block.parameters[parameter.key] = result);
     }
   }
 
   Widget _buildBlockHeader() {
     return Padding(
-      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Icon(
-              _getIconForBlock(widget.block.getDisplayName()),
-              color: Colors.white,
-              size: 16,
-            ),
-          ),
-          SizedBox(width: 8),
-          Flexible(
+          Icon(_icon, color: Colors.white, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            flex: 3,
             child: Text(
               widget.block.getDisplayName(),
-              style: GoogleFonts.roboto(
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
-                fontSize: 14,
               ),
             ),
           ),
-          if (widget.block.parameters.isNotEmpty) ...[
-            SizedBox(width: 8),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
+          if (BlockParameter.forType(widget.block.type) != null) ...[
+            const SizedBox(width: 8),
+            Flexible(
+              flex: 2,
               child: Text(
-                _getParameterPreview(),
-                style: GoogleFonts.roboto(
-                  color: Colors.white,
-                  fontSize: 12,
-                ),
+                _parameterPreview,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
               ),
             ),
           ],
@@ -245,140 +111,177 @@ class _BlockWidgetState extends State<BlockWidget> {
   }
 
   Widget _buildContainerBody() {
-    return Container(
-      margin: EdgeInsets.only(left: 24),
-      padding: EdgeInsets.all(8),
-      constraints: BoxConstraints(maxWidth: 280),
-      decoration: BoxDecoration(
-        color: widget.block.color.withValues(alpha: 0.7),
-        border: Border(
-          left: BorderSide(
-            color: Colors.white.withValues(alpha: 0.3),
-            width: 2,
-          ),
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(left: 20, right: 8, bottom: 8),
       child: DragTarget<Block>(
-        builder: (context, candidateData, rejectedData) {
-          return ConstrainedBox(
-            constraints: BoxConstraints(minHeight: 50),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                ...widget.block.children.map((childBlock) => Padding(
-                      padding: EdgeInsets.only(bottom: 8),
-                      child: BlockWidget(
-                        block: childBlock,
-                        onBlockSnapped: widget.onBlockSnapped,
-                        onBlockUnsnapped: widget.onBlockUnsnapped,
-                      ),
-                    )),
-                if (candidateData.isNotEmpty)
-                  Container(
-                    height: 40,
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.5),
-                        width: 2,
-                        style: BorderStyle.solid,
-                      ),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
-        onWillAcceptWithDetails: (details) => details.data != widget.block,
+        onWillAcceptWithDetails: (details) =>
+            widget.block.canAcceptChild(details.data),
         onAcceptWithDetails: (details) {
-          final block = details.data;
-          if (widget.onBlockSnapped != null) {
-            block.parent = widget.block;
-            widget.block.children.add(block);
-            widget.onBlockSnapped!(block);
+          if (widget.block.addChild(details.data)) {
+            setState(() {});
+            widget.onBlockSnapped?.call(details.data);
           }
         },
+        builder: (context, candidates, rejected) => Container(
+          constraints: const BoxConstraints(minHeight: 52),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: candidates.isNotEmpty
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.3),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final child in widget.block.children)
+                Padding(
+                  key: ObjectKey(child),
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: BlockWidget(
+                    block: child,
+                    onBlockSnapped: widget.onBlockSnapped,
+                    onBlockUnsnapped: widget.onBlockUnsnapped,
+                  ),
+                ),
+              if (widget.block.children.isEmpty || candidates.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Text(
+                    'Drop blocks here',
+                    style: TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  IconData _getIconForBlock(String label) {
-    switch (label.toLowerCase()) {
-      case 'move forward':
+  IconData get _icon {
+    switch (widget.block.type) {
+      case BlockType.moveForward:
         return Icons.arrow_upward;
-      case 'move backward':
+      case BlockType.moveBackward:
         return Icons.arrow_downward;
-      case 'turn left':
+      case BlockType.turnLeft:
         return Icons.arrow_back;
-      case 'turn right':
+      case BlockType.turnRight:
         return Icons.arrow_forward;
-      case 'stop':
+      case BlockType.stop:
         return Icons.stop;
-      case 'wait':
+      case BlockType.wait:
         return Icons.timer;
-      case 'if distance <':
+      case BlockType.ifDistance:
         return Icons.sensors;
-      case 'auto navigate':
+      case BlockType.autoNavigate:
         return Icons.auto_mode;
-      default:
-        return Icons.code;
     }
   }
 
-  String _getParameterPreview() {
-    if (widget.block.parameters.isEmpty) return '';
-
-    if (widget.block.parameters.containsKey('distance')) {
-      return '${widget.block.parameters['distance']}cm';
-    }
-    if (widget.block.parameters.containsKey('angle')) {
-      return '${widget.block.parameters['angle']}°';
-    }
-    if (widget.block.parameters.containsKey('time')) {
-      return '${widget.block.parameters['time']}ms';
-    }
-
-    return widget.block.parameters.values.first.toString();
+  String get _parameterPreview {
+    final parameter = BlockParameter.forType(widget.block.type)!;
+    return '${widget.block.parameters[parameter.key]} ${parameter.unit}';
   }
 }
 
-// Connection point widget for visual feedback
+class _ParameterDialog extends StatefulWidget {
+  final BlockParameter parameter;
+  final dynamic value;
+
+  const _ParameterDialog({required this.parameter, required this.value});
+
+  @override
+  State<_ParameterDialog> createState() => _ParameterDialogState();
+}
+
+class _ParameterDialogState extends State<_ParameterDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value.toString());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_formKey.currentState!.validate()) {
+      Navigator.pop(context, int.parse(_controller.text.trim()));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final parameter = widget.parameter;
+    return AlertDialog(
+      title: Text('Set ${parameter.label.toLowerCase()}'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.done,
+          onFieldSubmitted: (_) => _submit(),
+          decoration: InputDecoration(
+            labelText: parameter.label,
+            helperText:
+                '${parameter.minimum}–${parameter.maximum} ${parameter.unit}',
+            suffixText: parameter.unit,
+            border: const OutlineInputBorder(),
+          ),
+          validator: (text) =>
+              parameter.isValid(int.tryParse(text?.trim() ?? ''))
+              ? null
+              : 'Enter a whole number from ${parameter.minimum} to ${parameter.maximum}',
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('OK')),
+      ],
+    );
+  }
+}
+
 class ConnectionPoint extends StatelessWidget {
   final bool isInput;
   final bool isConnected;
   final VoidCallback? onTap;
 
   const ConnectionPoint({
-    Key? key,
+    super.key,
     this.isInput = true,
     this.isConnected = false,
     this.onTap,
-  }) : super(key: key);
+  });
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 12,
-        height: 12,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: isConnected ? Colors.green : Colors.grey[400],
-          border: Border.all(
-            color: Colors.white,
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.1),
-              blurRadius: 2,
-              offset: Offset(0, 1),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: isConnected ? Colors.green : Colors.grey[400],
+        border: Border.all(color: Colors.white, width: 2),
       ),
-    );
-  }
+    ),
+  );
 }

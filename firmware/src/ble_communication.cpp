@@ -1,298 +1,208 @@
 #include "ble_communication.h"
+#include "command_protocol.h"
 #include "motor_control.h"
-#include <Arduino.h>
+#include "navigation.h"
 #include <ArduinoJson.h>
+#include <freertos/task.h>
 
-// Global instance
 BLECommunication bleManager;
 
-BLECommunication::BLECommunication() 
-  : pServer(nullptr),
-    pCommandChar(nullptr),
-    pSensorChar(nullptr),
-    pService(nullptr),
-    deviceConnected(false),
-    oldDeviceConnected(false),
-    commandQueue(nullptr),
-    serverCallbacks(nullptr),
-    commandCallbacks(nullptr) {
-}
+BLECommunication::BLECommunication()
+  : pServer(nullptr), pCommandChar(nullptr), pSensorChar(nullptr), pService(nullptr),
+    deviceConnected(false), oldDeviceConnected(false), commandQueue(nullptr),
+    commandMutex(nullptr), transmitMutex(nullptr), serverCallbacks(nullptr), commandCallbacks(nullptr) {}
 
 BLECommunication::~BLECommunication() {
-  if (commandQueue) {
-    vQueueDelete(commandQueue);
-  }
+  if (commandQueue) vQueueDelete(commandQueue);
+  if (commandMutex) vSemaphoreDelete(commandMutex);
+  if (transmitMutex) vSemaphoreDelete(transmitMutex);
   delete serverCallbacks;
   delete commandCallbacks;
 }
 
 void BLECommunication::begin() {
-  // Initialize BLE device
-  BLEDevice::init(BLE_DEVICE_NAME);
-  Serial.printf("BLE Device initialized: %s\n", BLE_DEVICE_NAME);
-  
-  // Create command queue
   commandQueue = xQueueCreate(COMMAND_QUEUE_SIZE, sizeof(Command));
-  if (commandQueue == nullptr) {
-    Serial.println("Failed to create command queue");
+  commandMutex = xSemaphoreCreateMutex();
+  transmitMutex = xSemaphoreCreateMutex();
+  if (!commandQueue || !commandMutex || !transmitMutex) {
+    motorController.requestStop();
+    Serial.println("BLE initialization failed: insufficient memory");
     return;
   }
-  
-  // Initialize BLE service
+  BLEDevice::init(BLE_DEVICE_NAME);
   initializeService();
-  
-  // Start advertising
   startAdvertising();
-  
-  Serial.println("BLE communication ready");
 }
 
 void BLECommunication::initializeService() {
-  // Create BLE server
   pServer = BLEDevice::createServer();
-  
-  // Create and set callbacks
   serverCallbacks = new MyServerCallbacks(this);
   pServer->setCallbacks(serverCallbacks);
-  
-  // Create BLE service
   pService = pServer->createService(SERVICE_UUID);
-  
-  // Create command characteristic (write only)
-  pCommandChar = pService->createCharacteristic(
-    COMMAND_CHAR_UUID,
-    BLECharacteristic::PROPERTY_WRITE
-  );
-  
+  pCommandChar = pService->createCharacteristic(COMMAND_CHAR_UUID, BLECharacteristic::PROPERTY_WRITE);
   commandCallbacks = new CommandCharCallbacks(this);
   pCommandChar->setCallbacks(commandCallbacks);
-  
-  // Create sensor characteristic (notify only)
-  pSensorChar = pService->createCharacteristic(
-    SENSOR_CHAR_UUID,
-    BLECharacteristic::PROPERTY_NOTIFY
-  );
-  
-  // Add descriptor for notifications
+  pSensorChar = pService->createCharacteristic(SENSOR_CHAR_UUID, BLECharacteristic::PROPERTY_NOTIFY);
   pSensorChar->addDescriptor(new BLE2902());
-  
-  // Start the service
   pService->start();
-  
-  Serial.println("BLE service initialized");
 }
 
 void BLECommunication::startAdvertising() {
-  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x06);
-  pAdvertising->setMinPreferred(0x12);
-  
+  BLEAdvertising* advertising = BLEDevice::getAdvertising();
+  advertising->addServiceUUID(SERVICE_UUID);
+  advertising->setScanResponse(true);
+  advertising->setMinPreferred(0x06);
+  advertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
-  Serial.println("BLE advertising started");
 }
 
-bool BLECommunication::isConnected() const {
-  return deviceConnected;
-}
+bool BLECommunication::isConnected() const { return deviceConnected.load(); }
 
 void BLECommunication::handleConnection() {
-  // Handle disconnection
-  if (!deviceConnected && oldDeviceConnected) {
-    Serial.println("Device disconnected, restarting advertising");
-    delay(500); // Give time for client to process
-    pServer->startAdvertising();
-    oldDeviceConnected = deviceConnected;
+  if (!isConnected() && oldDeviceConnected) {
+    if (pServer) pServer->startAdvertising();
+    oldDeviceConnected = false;
   }
-  
-  // Handle new connection
-  if (deviceConnected && !oldDeviceConnected) {
-    Serial.println("Device connected");
-    oldDeviceConnected = deviceConnected;
-  }
+  if (isConnected() && !oldDeviceConnected) oldDeviceConnected = true;
 }
 
 void BLECommunication::disconnect() {
-  if (deviceConnected) {
-    pServer->disconnect(pServer->getConnId());
-    deviceConnected = false;
-    Serial.println("BLE disconnected");
-  }
+  stopAll("disconnected");
+  if (deviceConnected.exchange(false) && pServer) pServer->disconnect(pServer->getConnId());
 }
 
-Command BLECommunication::parseCommand(const String& cmd) {
-  Command command = {'S', 0}; // Default stop command
-  
-  if (cmd.length() == 0) {
-    return command;
+void BLECommunication::processCommand(const char* data, size_t length) {
+  Command command;
+  if (!parseRobotCommand(data, length, command)) {
+    sendCommandResult(command.id, "error", "invalid command or parameter");
+    return;
   }
-  
-  String trimmed = cmd;
-  trimmed.trim();
-  
-  if (trimmed.startsWith("F")) {
-    command.type = 'F';
-    command.value = trimmed.substring(1).toInt();
+  // STOP and AUTO_OFF bypass a full queue and immediately deenergize coils.
+  if (command.type == 'S' || (command.type == 'A' && command.value == 0)) {
+    stopAll("stopped");
+    sendCommandResult(command.id, "done");
+    return;
   }
-  else if (trimmed.startsWith("B")) {
-    command.type = 'B';
-    command.value = trimmed.substring(1).toInt();
+  if (command.type == 'C' || (command.type == 'K' && command.value == 1)) {
+    sendCommandResult(command.id, "error", "command unavailable in this release");
+    return;
   }
-  else if (trimmed.startsWith("L")) {
-    command.type = 'L';
-    command.value = trimmed.substring(1).toInt();
-  }
-  else if (trimmed.startsWith("R")) {
-    command.type = 'R';
-    command.value = trimmed.substring(1).toInt();
-  }
-  else if (trimmed == "STOP") {
-    command.type = 'S';
-    command.value = 0;
-  }
-  else if (trimmed == "AUTO_NAV") {
-    command.type = 'A';
-    command.value = 1;
-  }
-  else if (trimmed == "AUTO_OFF") {
-    command.type = 'A';
-    command.value = 0;
-  }
-  else if (trimmed == "CALIBRATE") {
-    command.type = 'C';
-    command.value = 0;
-  }
-  else if (trimmed == "CLOOP_ON") {
-    command.type = 'K';
-    command.value = 1;
-  }
-  else if (trimmed == "CLOOP_OFF") {
-    command.type = 'K';
-    command.value = 0;
-  }
-  else {
-    Serial.printf("Unknown command: %s\n", trimmed.c_str());
-  }
-
-  // Clamp parameters to safe ranges so a bad value can't trigger a runaway
-  // (e.g. "F99999") or otherwise multi-minute blocking move.
-  if (command.type == 'F' || command.type == 'B') {
-    command.value = constrain(command.value, 0, MAX_MOVE_DISTANCE_CM);
-  } else if (command.type == 'L' || command.type == 'R') {
-    command.value = constrain(command.value, 0, MAX_TURN_ANGLE);
-  }
-
-  return command;
+  addCommand(command);
 }
 
-void BLECommunication::processCommand(const String& cmd) {
-  Command command = parseCommand(cmd);
-
-  // A stop must interrupt any in-progress blocking move immediately, before
-  // it even reaches the front of the queue.
-  if (command.type == 'S') {
-    motorController.requestStop();
+void BLECommunication::addCommand(const Command& incoming) {
+  if (!commandQueue || !commandMutex) {
+    sendCommandResult(incoming.id, "error", "command queue unavailable");
+    return;
   }
-
-  if (xQueueSend(commandQueue, &command, 0) != pdTRUE) {
-    Serial.println("Command queue full, dropping command");
-  } else {
-    Serial.printf("Command queued: %c%d\n", command.type, command.value);
-  }
+  Command command = incoming;
+  xSemaphoreTake(commandMutex, portMAX_DELAY);
+  command.generation = motorController.getGeneration();
+  const bool queued = xQueueSend(commandQueue, &command, 0) == pdTRUE;
+  xSemaphoreGive(commandMutex);
+  if (!queued) sendCommandResult(command.id, "error", "command queue full");
 }
 
-bool BLECommunication::hasCommand() {
-  return uxQueueMessagesWaiting(commandQueue) > 0;
-}
+bool BLECommunication::hasCommand() { return commandQueue && uxQueueMessagesWaiting(commandQueue) > 0; }
 
 Command BLECommunication::getNextCommand() {
-  Command command = {'S', 0}; // Default
-  
-  if (xQueueReceive(commandQueue, &command, 0) == pdTRUE) {
-    return command;
-  }
-  
+  Command command{'?', 0};
+  if (!commandQueue || !commandMutex) return command;
+  xSemaphoreTake(commandMutex, portMAX_DELAY);
+  xQueueReceive(commandQueue, &command, 0);
+  xSemaphoreGive(commandMutex);
   return command;
 }
 
-void BLECommunication::addCommand(const Command& cmd) {
-  if (xQueueSend(commandQueue, &cmd, 0) != pdTRUE) {
-    Serial.println("Failed to add command to queue");
+void BLECommunication::stopAll(const char* reason) {
+  // Queue admission and generation capture cannot straddle a STOP barrier.
+  if (commandMutex) xSemaphoreTake(commandMutex, portMAX_DELAY);
+  motorController.requestStop();
+  navigator.disableAutonomousMode();
+  Command cancelled[COMMAND_QUEUE_SIZE];
+  size_t count = 0;
+  if (commandQueue) {
+    while (count < COMMAND_QUEUE_SIZE && xQueueReceive(commandQueue, &cancelled[count], 0) == pdTRUE) ++count;
   }
+  if (commandMutex) xSemaphoreGive(commandMutex);
+  for (size_t i = 0; i < count; ++i) sendCommandResult(cancelled[i].id, "cancelled", reason);
 }
 
 void BLECommunication::broadcastSensorData(const String& jsonData) {
-  if (deviceConnected && pSensorChar) {
-    pSensorChar->setValue(jsonData.c_str());
+  if (!isConnected() || !pSensorChar || !transmitMutex) return;
+  // Notifications may be only 20 payload bytes at the default ATT MTU. Keep
+  // each complete NDJSON record serialized across telemetry and command tasks.
+  xSemaphoreTake(transmitMutex, portMAX_DELAY);
+  const String record = jsonData + "\n";
+  for (size_t offset = 0; offset < record.length() && isConnected(); offset += 20) {
+    size_t count = record.length() - offset;
+    if (count > 20) count = 20;
+    pSensorChar->setValue(reinterpret_cast<uint8_t*>(const_cast<char*>(record.c_str() + offset)), count);
     pSensorChar->notify();
+    vTaskDelay(1); // allow BLE stack to drain the notification buffer
   }
+  xSemaphoreGive(transmitMutex);
 }
 
 void BLECommunication::sendTelemetry(const SensorData& data) {
-  if (!deviceConnected) return;
-  
-  StaticJsonDocument<200> doc;
-  doc["distance"] = data.distance;
+  StaticJsonDocument<384> doc;
+  doc["type"] = "telemetry";
+  if (data.distanceValid) doc["distance"] = data.distance;
+  else doc["distance"] = nullptr;
+  doc["distance_valid"] = data.distanceValid;
+  doc["distance_age_ms"] = data.distanceAgeMs;
   doc["battery"] = data.batteryLevel;
   doc["temperature"] = data.temperature;
   doc["heading"] = data.heading;
   doc["timestamp"] = data.timestamp;
-  
   String output;
   serializeJson(doc, output);
-  
+  broadcastSensorData(output);
+}
+
+void BLECommunication::sendCommandResult(uint16_t id, const char* status, const char* message) {
+  StaticJsonDocument<256> doc;
+  doc["type"] = "command";
+  doc["id"] = id;
+  doc["status"] = status;
+  if (message) doc["message"] = message;
+  String output;
+  serializeJson(doc, output);
   broadcastSensorData(output);
 }
 
 void BLECommunication::sendStatus(const String& status) {
-  if (!deviceConnected) return;
-  
-  StaticJsonDocument<100> doc;
+  StaticJsonDocument<256> doc;
+  doc["type"] = "status";
   doc["status"] = status;
   doc["timestamp"] = millis();
-  
   String output;
   serializeJson(doc, output);
-  
   broadcastSensorData(output);
 }
 
-void BLECommunication::clearCommandQueue() {
-  xQueueReset(commandQueue);
-  Serial.println("Command queue cleared");
+void BLECommunication::sendFault(const char* message) {
+  StaticJsonDocument<256> doc;
+  doc["type"] = "fault";
+  doc["message"] = message;
+  String output;
+  serializeJson(doc, output);
+  broadcastSensorData(output);
 }
 
-int BLECommunication::getQueueSize() {
-  return uxQueueMessagesWaiting(commandQueue);
-}
-
+void BLECommunication::clearCommandQueue() { stopAll("queue cleared"); }
+int BLECommunication::getQueueSize() { return commandQueue ? uxQueueMessagesWaiting(commandQueue) : 0; }
 void BLECommunication::printConnectionStatus() {
-  Serial.printf("BLE Status - Connected: %s, Queue size: %d\n", 
-                deviceConnected ? "YES" : "NO", 
-                getQueueSize());
+  Serial.printf("BLE connected=%d queue=%d\n", isConnected(), getQueueSize());
 }
+String BLECommunication::getDeviceAddress() { return BLEDevice::getAddress().toString().c_str(); }
 
-String BLECommunication::getDeviceAddress() {
-  return BLEDevice::getAddress().toString().c_str();
+void MyServerCallbacks::onConnect(BLEServer*) { bleComm->deviceConnected.store(true); }
+void MyServerCallbacks::onDisconnect(BLEServer*) {
+  bleComm->deviceConnected.store(false);
+  bleComm->stopAll("disconnected");
 }
-
-// Callback implementations
-void MyServerCallbacks::onConnect(BLEServer* pServer) {
-  bleComm->deviceConnected = true;
-  Serial.println("Client connected");
-}
-
-void MyServerCallbacks::onDisconnect(BLEServer* pServer) {
-  bleComm->deviceConnected = false;
-  Serial.println("Client disconnected");
-}
-
-void CommandCharCallbacks::onWrite(BLECharacteristic* pCharacteristic) {
-  String value = pCharacteristic->getValue().c_str();
-  
-  if (value.length() > 0) {
-    Serial.printf("Received command: %s\n", value.c_str());
-    bleComm->processCommand(value);
-  }
+void CommandCharCallbacks::onWrite(BLECharacteristic* characteristic) {
+  const std::string value = characteristic->getValue();
+  bleComm->processCommand(value.data(), value.size());
 }

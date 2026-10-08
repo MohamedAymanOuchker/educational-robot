@@ -1,162 +1,87 @@
-# E-Bug Robot Firmware
+# E-Bug ESP32 firmware
 
-ESP32-based firmware for the educational robot platform with advanced autonomy and BLE control.
+The supported firmware is `src/`, built with PlatformIO for an ESP32 Dev Module. It controls two **28BYJ-48 motors through ULN2003 boards**. The archived `legacy/arduino_main/` sketch is historical reference and is not a supported firmware option for this release.
 
-## 🛠️ Development Setup
+## Wiring and calibration
 
-### Prerequisites
-- [PlatformIO](https://platformio.org/) or Arduino IDE
-- ESP32 development board
-- Required components:
-  - MPU6050 IMU
-  - HC-SR04 ultrasonic sensor
-  - 2x stepper motors (28BYJ-48) with drivers
-  - Jumper wires
+The old STEP/DIR wiring does not apply. Rewire each ULN2003 board in its marked IN1–IN4 order:
 
-### Pin Configuration
-| Component | Pin | Description |
-|-----------|-----|-------------|
-| HC-SR04 | TRIG_PIN (5) | Ultrasonic trigger |
-| HC-SR04 | ECHO_PIN (18) | Ultrasonic echo |
-| Left Motor | STEP_PIN (26) | Step control |
-| Left Motor | DIR_PIN (27) | Direction control |
-| Right Motor | STEP_PIN (14) | Step control |
-| Right Motor | DIR_PIN (12) | Direction control |
-| Motors | EN_PIN_L (25), EN_PIN_R (13) | Enable pins |
-| MPU6050 | SDA (21), SCL (22) | I2C bus |
+| Connection | ESP32 GPIOs |
+|---|---|
+| Left ULN2003 IN1, IN2, IN3, IN4 | 26, 27, 25, 33 |
+| Right ULN2003 IN1, IN2, IN3, IN4 | 14, 13, 32, 23 |
+| HC-SR04 trigger, echo | 5, 18 |
+| MPU6050 SDA, SCL | 21, 22 |
+| Battery divider ADC input | 35 |
 
-## 📁 Project Structure
+See [the wiring guide](../hardware/wiring.md) and [selected motor/power parts](../hardware/power-system.md) before applying power. The reference design uses 5 V motors, a protected 2S Li-ion pack and a fixed 5 V regulator. Check existing parts against that selection. Share logic ground; reduce the HC-SR04 Echo voltage and verify the battery divider before connecting the ESP32. Firmware cannot select or verify the motor's physical voltage rating.
 
-```
-firmware/
-├── platformio.ini       # PlatformIO config
-├── src/                 # Primary firmware (built by PlatformIO)
-│   ├── main.cpp        # Main program entry
-│   ├── config.h        # Configuration & pins
-│   ├── types.h         # Data structures
-│   ├── ble_communication.*  # BLE handling
-│   ├── motor_control.*      # Motor functions
-│   ├── navigation.*         # Path planning
-│   └── sensor_manager.*     # Sensor interface
-└── legacy/
-    └── arduino_main/   # Single-file Arduino IDE sketch (archived)
-        └── arduino_main.ino
-```
+The driver uses an eight-phase half-step sequence, nominal **4096 half-steps per output revolution**, and **2000 microseconds per half-step** (500 half-steps/s, subject to RTOS scheduling). Gearbox variants differ: calibrate steps/revolution, the retained 65mm wheel diameter and 150mm track width against the actual robot. These geometry values are assumptions, not measured results.
 
-## ⚙️ Building & Uploading
+The [physical acceptance record](../docs/hardware-acceptance.md#motion-calibration) provides calibration formulas and trial tables, including external gearing. Use the [assembly sequence](../docs/assembly-guide.md) to keep USB programming separate from powered motor tests. No runtime calibration command replaces those measurements.
 
-Using PlatformIO:
-```bash
-# Build project
+`LEFT_MOTOR_INVERT=false` and `RIGHT_MOTOR_INVERT=true` assume mirrored mounting. Check forward, backward and both turns with wheels raised, and adjust these constants to match the wiring/mounting. Motors start deenergized and release their coils after each movement. STOP deenergizes all eight outputs and stays latched until a new explicit command is accepted. Old stored motor-speed settings are not loaded.
+
+## Build, test and upload
+
+Install PlatformIO Core, then run from this folder:
+
+```sh
 pio run
+python test/host/run_tests.py
+```
 
-# Upload to ESP32
+The host tests require Python and a C++17 compiler (`g++` or `clang++`, or set `CXX`). They compile the production source with hardware/FreeRTOS/BLE doubles. They check parsing, coils, cancellation races, queue capacity, sensor failures/freshness and navigation thresholds. They do not validate motor torque, actual radio delivery, power integrity or physical stopping distance.
+
+The reproducible build pins Espressif32 7.0.1, ArduinoJson 6.21.6 and MPU6050 1.4.5. Only upload after checking the wiring and motor voltage:
+
+```sh
 pio run --target upload
-
-# Monitor serial output
 pio device monitor
 ```
 
-Using Arduino IDE (legacy single-file sketch):
-1. Open legacy/arduino_main/arduino_main.ino
-2. Select "ESP32 Dev Module" board
-3. Set upload speed to 921600
-4. Click Upload
+Serial monitoring uses 115200 baud. Board flashing is not part of the automated checks.
 
-## 🌟 Features
+## BLE commands and results
 
-- **BLE Communication**
-  - Custom service UUID: `12345678-1234-1234-1234-123456789abc`
-  - Command characteristic for control
-  - Sensor characteristic for telemetry
+The complete app/firmware contract is in [BLE protocol](../docs/ble-protocol.md). UUIDs remain unchanged. Send one ASCII command in one GATT write, with a request ID from 1 through 65535 and a trailing newline:
 
-- **Motor Control**
-  - Precise stepper motor control
-  - Forward/backward movement
-  - Left/right rotation
-  - Emergency stop functionality
+```text
+1:F20
+2:L90
+3:STOP
+```
 
-- **Autonomous Navigation**
-  - Enhanced E-Bug algorithm
-  - Obstacle avoidance
-  - Path memory system
-  - Dead-end detection
+| Command | Meaning |
+|---|---|
+| `F0` through `F500` | Forward distance in centimetres |
+| `B0` through `B500` | Backward distance in centimetres |
+| `L0` through `L360`, `R0` through `R360` | Turn angle in degrees |
+| `STOP`, `AUTO_OFF` | Priority stop, cancel queue and leave autonomous mode |
+| `AUTO_NAV` | Enable autonomous mode; completion confirms mode activation |
+| `CLOOP_OFF` | Confirm the supported open-loop turning mode |
+| `CALIBRATE`, `CLOOP_ON` | Explicit error: unavailable in this release |
 
-- **Sensor Integration**
-  - Distance measurement
-  - Orientation tracking
-  - Real-time telemetry
-  - Filtered readings
+Unnumbered commands are accepted for manual diagnostics and return ID 0. Runtime recalibration and closed-loop turns are not enabled. Initial IMU calibration may still run at boot if no calibration is stored; keep the robot still during startup.
 
-## 🤖 Command Protocol
+Unknown commands, negative/fractional values, overflow, trailing garbage and overlong writes are rejected. They never become STOP or a clamped movement. Queue-full requests return errors. STOP bypasses the queue, cancels pending commands and prevents previously dequeued commands from rearming motion. Disconnection performs the same physical stop and queue cancellation; results cannot be delivered while disconnected.
 
-Commands are sent via BLE in the format: `<TYPE><VALUE>`
+All responses are newline-delimited JSON on the sensor notification characteristic. Records are split into chunks of at most 20 bytes; clients must buffer until newline. Complete records are serialized under a mutex so telemetry and command responses cannot interleave.
 
-| Type | Description | Example |
-|------|-------------|---------|
-| F | Forward (cm) | `F20` |
-| B | Backward (cm) | `B15` |
-| L | Left turn (degrees) | `L90` |
-| R | Right turn (degrees) | `R45` |
-| S | Stop | `STOP` |
-| A | Auto mode | `AUTO_NAV` |
-| C | Recalibrate IMU | `CALIBRATE` |
-| K | Closed-loop turns on/off (experimental) | `CLOOP_ON` / `CLOOP_OFF` |
-
-> **Closed-loop turning is experimental and off by default.** When enabled
-> (`CLOOP_ON`), turns use MPU6050 yaw feedback instead of open-loop step
-> counting. It has not been validated on hardware — verify the turn direction
-> and convergence on the robot, and flip the direction mapping in
-> `rotateRobotClosedLoop()` if it turns the wrong way.
-
-## 📊 Telemetry Data
-
-JSON format:
 ```json
-{
-  "distance": 45.2,    // cm
-  "battery": 95.0,     // percentage
-  "temperature": 25.3, // celsius
-  "heading": 182.5     // degrees
-}
+{"type":"command","id":1,"status":"done"}
+{"type":"command","id":2,"status":"cancelled","message":"stopped during command"}
+{"type":"telemetry","distance":null,"distance_valid":false,"distance_age_ms":320,"battery":80,"heading":0,"temperature":25,"timestamp":10200}
 ```
 
-## 🔧 Configuration
+An autonomous safety abort also emits `{"type":"fault","message":"..."}` so the app fails the active program even after mode activation was acknowledged. A user STOP alone does not emit a fault.
 
-Key parameters in config.h:
-```cpp
-#define MIN_OBSTACLE_DIST   25  // cm
-#define CRITICAL_DISTANCE   15  // cm
-#define STEPS_PER_REV      200
-#define WHEEL_DIAMETER     65   // mm
-#define ROBOT_WIDTH       150   // mm
-```
+A blocked/aborted movement returns `error`/`cancelled`, never `done`. A failed movement also cancels the remaining queued program. `AUTO_NAV` runs until STOP/AUTO_OFF, disconnect or a sensing failure; the mobile app bounds its autonomous block to three seconds and then sends STOP.
 
-## 🐛 Debugging
+## Sensing and remaining hardware checks
 
-1. Enable debug output in platformio.ini:
-```ini
-build_flags = 
-    -DCORE_DEBUG_LEVEL=3
-```
+Ultrasonic sampling is scheduled every 60ms, with trigger spacing shared by all callers. No echo or out-of-range echo immediately invalidates the range. A successful sample older than 250ms is also invalid. Forward motion checks this coherent sensor snapshot at every half-step; missing/stale distance or a reading below 15cm stops the movement. Invalid range is reported as JSON `null`, never a false-clear 999cm value.
 
-2. Monitor serial output at 115200 baud
-3. Check status messages and sensor readings
+The sensor task services IMU integration nominally every 10ms (ultrasonic echo waits can delay it). Telemetry is sent separately every 250ms. Heading is an uncorrected gyro estimate and may drift; MPU6050 temperature is die temperature. Battery percentage depends on the configured pack/divider calibration.
 
-## 📝 Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Follow coding standards
-4. Test thoroughly
-5. Submit pull request
-
-## 📄 License
-
-MIT License - See LICENSE for details.
-
-## 👥 Authors
-
-- Mohamed Ayman OUCHKER - Main development
-
-For questions: ayman.ouchker@outlook.com
+Autonomous forward steps cover the previous 25–50cm dead zone. Invalid range or critically close obstacles stop autonomous operation. The existing turning/scanning heuristic remains experimental. There is no rear/side sensor: supervise backward movement and rotations. Bench validation must still establish motor direction, distance/angle calibration, reliable BLE stop/disconnect behavior, voltage levels, and stopping clearance on the actual robot.

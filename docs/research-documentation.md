@@ -1,5 +1,7 @@
 # Educational Robot Research Documentation
 
+> **Submission status — reconciliation pending (7 October 2026):** the author confirms this is a real study. The historical summaries below are preserved, but several totals, session summaries and follow-up claims conflict. The supplied preliminary paper also identifies missing participant-level records and the unidentified study software version. Do not reuse the conflicting figures as verified final results until the [research reconciliation checklist](research-reconciliation.md) is closed. The current code changes do not establish which software version was used in the pilot.
+
 ## Abstract
 
 This document presents comprehensive research findings from the educational effectiveness evaluation of a low-cost robotics platform designed for children aged 7-12. The study employed a mixed-methods approach with 24 participants across the target age range, measuring computational thinking development, programming concept mastery, and engagement metrics. Results demonstrate significant learning improvements across all measured domains, with 89% average improvement in programming concept understanding and sustained engagement averaging 45 minutes per session. The research validates the effectiveness of mobile-first, cost-optimized educational robotics for democratizing STEM education.
@@ -343,6 +345,7 @@ Sullivan and Bers (2016) found that scaffolded programming environments achieved
 - No ceiling effects observed in any measure
 
 #### Age Group Analysis
+> These cohort aggregates do not reproduce the stated overall means when weighted by the stated group sizes; reconcile from the original scores before submission.
 **Improvement by Age Cohort**
 
 | Age Group | N | Pre-Test M(SD) | Post-Test M(SD) | Improvement % | Effect Size |
@@ -439,6 +442,7 @@ Sullivan and Bers (2016) found that scaffolded programming environments achieved
 ### Engagement and Motivation Metrics
 
 #### Session Duration Analysis
+> This historical summary is unresolved: the median and proportion above 45 minutes are incompatible for a single observation set, and weighted phase means differ from the overall mean. See [the reconciliation notes](research-reconciliation.md).
 
 **Engagement Patterns (N=24, 12 sessions each):**
 - **Mean session duration:** 45.3 minutes (SD = 8.7)

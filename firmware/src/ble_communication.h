@@ -9,6 +9,8 @@
 #include <BLEServer.h>
 #include <BLE2902.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
+#include <atomic>
 
 // Forward declarations for callback classes
 class MyServerCallbacks;
@@ -21,19 +23,20 @@ private:
   BLECharacteristic* pSensorChar;
   BLEService* pService;
   
-  bool deviceConnected;
+  std::atomic<bool> deviceConnected;
   bool oldDeviceConnected;
   
   // Command processing
   QueueHandle_t commandQueue;
+  SemaphoreHandle_t commandMutex;
+  SemaphoreHandle_t transmitMutex;
   
   // Callback instances
   MyServerCallbacks* serverCallbacks;
   CommandCharCallbacks* commandCallbacks;
   
   // Helper functions
-  Command parseCommand(const String& cmd);
-  void processCommand(const String& cmd);
+  void processCommand(const char* data, size_t length);
 
 public:
   BLECommunication();
@@ -53,11 +56,14 @@ public:
   bool hasCommand();
   Command getNextCommand();
   void addCommand(const Command& cmd);
+  void stopAll(const char* reason = "stopped");
   
   // Data transmission
   void broadcastSensorData(const String& jsonData);
   void sendTelemetry(const SensorData& data);
   void sendStatus(const String& status);
+  void sendCommandResult(uint16_t id, const char* status, const char* message = nullptr);
+  void sendFault(const char* message);
   
   // Queue management
   void clearCommandQueue();

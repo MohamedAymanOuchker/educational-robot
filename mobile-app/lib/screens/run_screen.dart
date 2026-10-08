@@ -1,724 +1,230 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:google_fonts/google_fonts.dart';
+
+import '../services/program_executor.dart';
 import '../services/robot_service.dart';
+import '../widgets/block_editor/block_types.dart';
 
 class RunScreen extends StatefulWidget {
-  final String generatedCode;
-  const RunScreen({Key? key, required this.generatedCode}) : super(key: key);
+  const RunScreen({
+    super.key,
+    required this.blocks,
+    this.robot,
+    this.onCompleted,
+  });
+  final List<Block> blocks;
+  final RobotClient? robot;
+  final Future<String> Function(ProgramResult result)? onCompleted;
 
   @override
-  _RunScreenState createState() => _RunScreenState();
+  State<RunScreen> createState() => _RunScreenState();
 }
 
-class _RunScreenState extends State<RunScreen> with TickerProviderStateMixin {
-  final RobotService _robotService = RobotService();
-
-  bool isRunning = false;
-  bool isPaused = false;
-  double progress = 0.0;
-  String currentStatus = 'Ready to Run!';
-  List<String> programLogs = [];
-  List<String> commands = [];
-  int currentCommandIndex = 0;
-  late AnimationController _robotController;
+class _RunScreenState extends State<RunScreen> with WidgetsBindingObserver {
+  late final RobotClient _robot;
+  late final ProgramExecutor _executor;
+  late final List<Block> _program;
+  StreamSubscription<ConnectionStatus>? _connectionSubscription;
+  StreamSubscription<String>? _responseSubscription;
+  final List<String> _logs = [];
+  bool _running = false;
+  bool _stopping = false;
+  bool _canLeave = false;
+  bool _savingProgress = false;
+  String? _practiceMessage;
+  double _progress = 0;
+  String _status = 'Ready to run';
+  ProgramStatus? _resultStatus;
 
   @override
   void initState() {
     super.initState();
-    _robotController = AnimationController(
-      vsync: this,
-      duration: Duration(seconds: 2),
-    );
-
-    // Parse the generated code into executable commands
-    _parseCommands();
-
-    // Listen to robot service responses
-    _robotService.commandResponse.listen((response) {
-      _addLog('📡 Robot: $response');
+    WidgetsBinding.instance.addObserver(this);
+    _robot = widget.robot ?? RobotService();
+    _executor = ProgramExecutor(_robot);
+    // The editor may keep changing after this route opens.
+    _program = widget.blocks.map((block) => block.clone()).toList();
+    _connectionSubscription = _robot.connectionStatus.listen((_) {
+      if (mounted) setState(() {});
     });
+    _responseSubscription = _robot.commandResponse.listen(_log);
+  }
 
-    // Listen to sensor data during execution
-    _robotService.sensorData.listen((data) {
-      if (isRunning && data.containsKey('distance')) {
-        double distance = data['distance']?.toDouble() ?? 0.0;
-        if (distance < 10) {
-          _addLog(
-              '⚠️ Obstacle detected! Distance: ${distance.toStringAsFixed(1)}cm');
-        }
-      }
-    });
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed && _running) {
+      unawaited(_stop());
+    }
   }
 
   @override
   void dispose() {
-    _robotController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _connectionSubscription?.cancel();
+    _responseSubscription?.cancel();
+    if (_executor.isRunning && !_canLeave) unawaited(_executor.cancel());
     super.dispose();
   }
 
-  void _parseCommands() {
-    commands.clear();
-
-    // Split the generated code and extract meaningful commands
-    List<String> codeLines = widget.generatedCode
-        .split('\n')
-        .where((line) => line.trim().isNotEmpty)
-        .toList();
-
-    for (String line in codeLines) {
-      String trimmed = line.trim();
-
-      // Extract command from different patterns
-      if (trimmed.contains('sendCommand(')) {
-        // Extract command from sendCommand("COMMAND") format
-        RegExp commandRegex = RegExp(r'sendCommand\("([^"]+)"\)');
-        Match? match = commandRegex.firstMatch(trimmed);
-        if (match != null) {
-          commands.add(match.group(1)!);
-        }
-      } else if (trimmed.contains('Future.delayed')) {
-        // Extract wait time
-        RegExp delayRegex = RegExp(r'Duration\(milliseconds:\s*(\d+)\)');
-        Match? match = delayRegex.firstMatch(trimmed);
-        if (match != null) {
-          int milliseconds = int.parse(match.group(1)!);
-          commands.add('WAIT:$milliseconds');
-        }
-      } else if (trimmed.contains('getDistance()')) {
-        commands.add('GET_DISTANCE');
-      } else if (trimmed.startsWith('await')) {
-        // Handle direct command lines
-        commands.add(trimmed.replaceAll('await ', '').replaceAll(';', ''));
-      }
-    }
-
-    if (commands.isEmpty) {
-      // If no commands parsed, try to parse as simple format
-      for (String line in codeLines) {
-        String trimmed = line.trim();
-        if (trimmed.isNotEmpty && !trimmed.startsWith('//')) {
-          commands.add(trimmed);
-        }
-      }
-    }
-
-    _addLog('📋 Loaded ${commands.length} commands');
-    for (int i = 0; i < commands.length; i++) {
-      _addLog('${i + 1}. ${commands[i]}');
-    }
-  }
-
-  void startProgram() async {
-    if (!_robotService.isConnected) {
-      _addLog('❌ Error: Not connected to robot!');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.error, color: Colors.white),
-              SizedBox(width: 8),
-              Text('Please connect to your robot first!'),
-            ],
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    if (commands.isEmpty) {
-      _addLog('❌ No commands to execute!');
-      return;
-    }
-
+  void _log(String message) {
+    if (!mounted) return;
     setState(() {
-      isRunning = true;
-      isPaused = false;
-      progress = 0.0;
-      currentCommandIndex = 0;
-      currentStatus = 'Executing program on robot...';
+      _logs.add(message);
+      if (_logs.length > 200) _logs.removeAt(0);
     });
-
-    programLogs.clear();
-    _addLog('🚀 Starting program execution on robot!');
-    _robotController.repeat();
-
-    await _executeCommands();
   }
 
-  void pauseProgram() {
+  Future<void> _start() async {
+    if (_running || _stopping || _savingProgress) return;
     setState(() {
-      isPaused = !isPaused;
-      currentStatus = isPaused ? 'Program paused' : 'Resuming execution...';
+      _running = true;
+      _progress = 0;
+      _resultStatus = null;
+      _status = 'Starting program';
+      _logs.clear();
+      _practiceMessage = null;
     });
-
-    if (isPaused) {
-      _addLog('⏸️ Program paused by user');
-      _robotService.stopRobot(); // Stop current movement
-    } else {
-      _addLog('▶️ Program resumed');
-    }
-  }
-
-  void stopProgram() {
-    setState(() {
-      isRunning = false;
-      isPaused = false;
-      currentStatus = 'Program stopped';
-    });
-
-    _addLog('🛑 Program stopped by user');
-    _robotController.stop();
-    _robotService.stopRobot(); // Send stop command to robot
-  }
-
-  Future<void> _executeCommands() async {
-    try {
-      for (int i = 0; i < commands.length && isRunning; i++) {
-        if (isPaused) {
-          // Wait while paused
-          while (isPaused && isRunning) {
-            await Future.delayed(Duration(milliseconds: 100));
-          }
-          if (!isRunning) break;
-        }
-
+    final result = await _executor.run(
+      _program,
+      onProgress: (done, total, message) {
+        if (!mounted) return;
         setState(() {
-          currentCommandIndex = i;
-          progress = i / commands.length;
-          currentStatus = 'Executing command ${i + 1} of ${commands.length}';
+          _progress = done / total;
+          _status = message;
         });
-
-        String command = commands[i];
-        bool success = await _executeCommand(command);
-
-        if (!success) {
-          _addLog('❌ Command failed: $command');
-          setState(() {
-            currentStatus = 'Execution failed at command ${i + 1}';
-          });
-          break;
-        }
-
-        // Small delay between commands
-        await Future.delayed(Duration(milliseconds: 200));
+        _log(message);
+      },
+    );
+    if (!mounted) return;
+    setState(() {
+      _running = false;
+      _resultStatus = result.status;
+      _status = result.message;
+      if (result.status == ProgramStatus.completed) _progress = 1;
+    });
+    _log(result.message);
+    if (result.status == ProgramStatus.completed &&
+        widget.onCompleted != null) {
+      setState(() => _savingProgress = true);
+      String message;
+      try {
+        message = await widget.onCompleted!(result);
+      } catch (_) {
+        message =
+            'Program ran, but practice progress could not be saved. Run again to retry.';
       }
-
-      if (isRunning) {
-        setState(() {
-          isRunning = false;
-          progress = 1.0;
-          currentStatus = 'Program completed successfully! 🎉';
-        });
-        _addLog('✨ Program execution completed successfully!');
-      }
-    } catch (e) {
+      if (!mounted) return;
       setState(() {
-        isRunning = false;
-        currentStatus = 'Execution error occurred';
+        _savingProgress = false;
+        _practiceMessage = message;
       });
-      _addLog('❌ Execution error: $e');
-    } finally {
-      _robotController.stop();
     }
   }
 
-  Future<bool> _executeCommand(String command) async {
-    try {
-      // Remove 'await' and ';' if present
-      command = command.replaceAll('await ', '').replaceAll(';', '').trim();
-
-      if (command.startsWith('WAIT:')) {
-        int milliseconds = int.parse(command.split(':')[1]);
-        _addLog('⏳ Waiting ${milliseconds}ms...');
-        await Future.delayed(Duration(milliseconds: milliseconds));
-        return true;
-      } else if (command == 'GET_DISTANCE' || command.contains('getDistance')) {
-        _addLog('📏 Getting distance reading...');
-        double? distance = await _robotService.getDistance();
-        if (distance != null) {
-          _addLog('📏 Distance: ${distance.toStringAsFixed(1)}cm');
-        }
-        return true;
-      } else if (command.startsWith('sendCommand("F') ||
-          command.startsWith('F')) {
-        // Forward movement
-        String cleanCommand =
-            command.replaceAll('sendCommand("', '').replaceAll('")', '');
-        String distanceStr = cleanCommand.substring(1);
-        double distance = double.tryParse(distanceStr) ?? 100;
-        _addLog('🤖 Moving forward ${distance.toInt()}cm...');
-        return await _robotService.moveForward(distance);
-      } else if (command.startsWith('sendCommand("B') ||
-          command.startsWith('B')) {
-        // Backward movement
-        String cleanCommand =
-            command.replaceAll('sendCommand("', '').replaceAll('")', '');
-        String distanceStr = cleanCommand.substring(1);
-        double distance = double.tryParse(distanceStr) ?? 100;
-        _addLog('🤖 Moving backward ${distance.toInt()}cm...');
-        return await _robotService.moveBackward(distance);
-      } else if (command.startsWith('sendCommand("L') ||
-          command.startsWith('L')) {
-        // Left turn
-        String cleanCommand =
-            command.replaceAll('sendCommand("', '').replaceAll('")', '');
-        String angleStr = cleanCommand.substring(1);
-        double angle = double.tryParse(angleStr) ?? 90;
-        _addLog('↪️ Turning left ${angle.toInt()}°...');
-        return await _robotService.turnLeft(angle);
-      } else if (command.startsWith('sendCommand("R') ||
-          command.startsWith('R')) {
-        // Right turn
-        String cleanCommand =
-            command.replaceAll('sendCommand("', '').replaceAll('")', '');
-        String angleStr = cleanCommand.substring(1);
-        double angle = double.tryParse(angleStr) ?? 90;
-        _addLog('↩️ Turning right ${angle.toInt()}°...');
-        return await _robotService.turnRight(angle);
-      } else if (command.contains('STOP') || command.contains('stopRobot')) {
-        _addLog('🛑 Stopping robot...');
-        return await _robotService.stopRobot();
-      } else if (command.contains('AUTO_NAV') ||
-          command.contains('autoNavigate')) {
-        _addLog('🎯 Starting autonomous navigation...');
-        return await _robotService.autoNavigate();
-      } else if (command.contains('Future.delayed')) {
-        // Extract delay time
-        RegExp delayRegex = RegExp(r'Duration\(milliseconds:\s*(\d+)\)');
-        Match? match = delayRegex.firstMatch(command);
-        if (match != null) {
-          int milliseconds = int.parse(match.group(1)!);
-          _addLog('⏳ Waiting ${milliseconds}ms...');
-          await Future.delayed(Duration(milliseconds: milliseconds));
-          return true;
-        }
-      } else {
-        // Generic command - try to send as-is
-        _addLog('⚡ Executing: $command');
-        return await _robotService.sendCommand(command);
-      }
-    } catch (e) {
-      _addLog('❌ Error executing command "$command": $e');
-      return false;
-    }
-    return false;
-  }
-
-  void _addLog(String message) {
+  Future<void> _stop() async {
+    if (_stopping) return;
     setState(() {
-      programLogs.add(message);
+      _stopping = true;
+      _status = 'Stopping robot...';
     });
-    print('RunScreen: $message');
+    final stopped = await _executor.cancel();
+    if (!mounted) return;
+    setState(() {
+      _stopping = false;
+      if (!_running) {
+        _resultStatus = ProgramStatus.stopped;
+        _status = stopped ? 'Robot stopped.' : 'Robot STOP was not confirmed.';
+      }
+    });
+  }
+
+  Future<void> _leave() async {
+    if (_stopping) return;
+    if (_running) await _stop();
+    if (!mounted) return;
+    setState(() => _canLeave = true);
+    // Rebuild PopScope before the actual route pop.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) Navigator.of(context).pop();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          "Robot Execution",
-          style: GoogleFonts.comicNeue(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.copy),
-            tooltip: 'Copy Generated Code',
-            onPressed: () async {
-              await Clipboard.setData(
-                  ClipboardData(text: widget.generatedCode));
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Row(
-                    children: [
-                      Icon(Icons.check_circle, color: Colors.white),
-                      SizedBox(width: 8),
-                      Text('Code copied to clipboard'),
-                    ],
-                  ),
-                  duration: Duration(seconds: 2),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header with Robot Status
-            Container(
-              width: double.infinity,
-              padding: EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Colors.indigo[400]!, Colors.indigo[600]!],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+    final failure = _resultStatus == ProgramStatus.failed;
+    return PopScope<Object?>(
+      canPop: _canLeave || (!_running && !_stopping),
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_leave());
+      },
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Robot Execution')),
+        body: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _robot.isConnected ? 'Robot connected' : 'Robot disconnected',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _status,
+                key: const Key('execution-status'),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: failure ? Colors.red : null,
                 ),
               ),
-              child: Column(
+              const SizedBox(height: 16),
+              LinearProgressIndicator(value: _progress),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
                 children: [
-                  Row(
-                    children: [
-                      AnimatedBuilder(
-                        animation: _robotController,
-                        builder: (context, child) {
-                          return Transform.rotate(
-                            angle: _robotController.value * 0.5,
-                            child: Icon(
-                              Icons.smart_toy,
-                              size: 48,
-                              color: Colors.white,
-                            ),
-                          );
-                        },
-                      ),
-                      SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Robot Program Execution',
-                              style: GoogleFonts.comicNeue(
-                                fontSize: 24,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                            Text(
-                              _robotService.isConnected
-                                  ? 'Connected & Ready'
-                                  : 'Not Connected',
-                              style: GoogleFonts.comicNeue(
-                                fontSize: 16,
-                                color: _robotService.isConnected
-                                    ? Colors.green[200]
-                                    : Colors.red[200],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+                  ElevatedButton.icon(
+                    onPressed:
+                        !_running &&
+                            !_stopping &&
+                            !_savingProgress &&
+                            _robot.isConnected
+                        ? _start
+                        : null,
+                    icon: const Icon(Icons.play_arrow),
+                    label: const Text('Start'),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: !_stopping && _robot.isConnected ? _stop : null,
+                    icon: const Icon(Icons.stop),
+                    label: const Text('Stop'),
                   ),
                 ],
               ),
-            ),
-
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Status Card with Progress
-                  Card(
-                    child: Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                isRunning
-                                    ? Icons.play_circle_filled
-                                    : Icons.play_circle_outline,
-                                color: isRunning ? Colors.blue : Colors.green,
-                                size: 32,
-                              ),
-                              SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  currentStatus,
-                                  style: GoogleFonts.comicNeue(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color:
-                                        isRunning ? Colors.blue : Colors.green,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (isRunning || progress > 0) ...[
-                            SizedBox(height: 16),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: LinearProgressIndicator(
-                                value: progress,
-                                minHeight: 20,
-                                backgroundColor: Colors.blue[100],
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.blue,
-                                ),
-                              ),
-                            ),
-                            SizedBox(height: 8),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  '${(progress * 100).toInt()}% Complete',
-                                  style: GoogleFonts.comicNeue(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue,
-                                  ),
-                                ),
-                                Text(
-                                  'Command ${currentCommandIndex + 1} of ${commands.length}',
-                                  style: GoogleFonts.comicNeue(
-                                    fontSize: 14,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                  SizedBox(height: 16),
-
-                  // Control Buttons
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildControlButton(
-                        onPressed: !isRunning && _robotService.isConnected
-                            ? startProgram
-                            : null,
-                        icon: Icons.play_arrow_rounded,
-                        label: 'Start',
-                        color: Colors.green,
-                      ),
-                      SizedBox(width: 12),
-                      _buildControlButton(
-                        onPressed: isRunning ? pauseProgram : null,
-                        icon: isPaused
-                            ? Icons.play_arrow_rounded
-                            : Icons.pause_rounded,
-                        label: isPaused ? 'Resume' : 'Pause',
-                        color: Colors.orange,
-                      ),
-                      SizedBox(width: 12),
-                      _buildControlButton(
-                        onPressed: isRunning ? stopProgram : null,
-                        icon: Icons.stop_rounded,
-                        label: 'Stop',
-                        color: Colors.red,
-                      ),
-                    ],
-                  ),
-
-                  if (!_robotService.isConnected) ...[
-                    SizedBox(height: 16),
-                    Card(
-                      color: Colors.orange[50],
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Icon(Icons.warning, color: Colors.orange),
-                            SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                'Connect to your robot in the Connect tab to run programs!',
-                                style: GoogleFonts.comicNeue(
-                                  color: Colors.orange[800],
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  SizedBox(height: 24),
-
-                  // Generated Code Display Card
-                  Card(
-                    child: ExpansionTile(
-                      title: Text(
-                        "View Generated Code",
-                        style: GoogleFonts.comicNeue(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      children: [
-                        Container(
-                          padding: EdgeInsets.all(16),
-                          color: Colors.grey[100],
-                          width: double.infinity,
-                          child: SelectableText(
-                            widget.generatedCode,
-                            style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: 16),
-
-                  // Execution Log
-                  Card(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Row(
-                            children: [
-                              Icon(Icons.terminal, color: Colors.indigo),
-                              SizedBox(width: 8),
-                              Text(
-                                'Execution Log',
-                                style: GoogleFonts.comicNeue(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Spacer(),
-                              if (programLogs.isNotEmpty)
-                                TextButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      programLogs.clear();
-                                    });
-                                  },
-                                  icon: Icon(Icons.clear_all, size: 16),
-                                  label: Text('Clear'),
-                                  style: TextButton.styleFrom(
-                                    foregroundColor: Colors.grey,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        Divider(height: 1),
-                        Container(
-                          height: 250,
-                          child: programLogs.isEmpty
-                              ? Center(
-                                  child: Text(
-                                    'Click Start to execute your program! 🚀',
-                                    style: GoogleFonts.comicNeue(
-                                      fontSize: 16,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                )
-                              : ListView.builder(
-                                  padding: EdgeInsets.all(16),
-                                  itemCount: programLogs.length,
-                                  itemBuilder: (context, index) {
-                                    bool isCurrentCommand = isRunning &&
-                                        index == programLogs.length - 1;
-
-                                    return Container(
-                                      margin: EdgeInsets.only(bottom: 8),
-                                      padding: EdgeInsets.all(8),
-                                      decoration: BoxDecoration(
-                                        color: isCurrentCommand
-                                            ? Colors.blue[50]
-                                            : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: isCurrentCommand
-                                            ? Border.all(
-                                                color: Colors.blue[200]!)
-                                            : null,
-                                      ),
-                                      child: Row(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Container(
-                                            width: 24,
-                                            height: 24,
-                                            decoration: BoxDecoration(
-                                              color: isCurrentCommand
-                                                  ? Colors.blue[100]
-                                                  : Colors.indigo[100],
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                '${index + 1}',
-                                                style: GoogleFonts.comicNeue(
-                                                  color: isCurrentCommand
-                                                      ? Colors.blue
-                                                      : Colors.indigo,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                          SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              programLogs[index],
-                                              style: GoogleFonts.comicNeue(
-                                                fontSize: 14,
-                                                fontWeight: isCurrentCommand
-                                                    ? FontWeight.w600
-                                                    : FontWeight.normal,
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 12),
+              if (_savingProgress) const Text('Saving practice progress...'),
+              if (_practiceMessage != null)
+                Text(_practiceMessage!, key: const Key('practice-result')),
+              const Text(
+                'Leaving this screen or putting the app in the background stops the program. Auto Navigate runs for 3 seconds.',
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildControlButton({
-    required VoidCallback? onPressed,
-    required IconData icon,
-    required String label,
-    required Color color,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 24),
-      label: Text(
-        label,
-        style: GoogleFonts.comicNeue(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+              const Divider(height: 32),
+              Text(
+                'Execution log',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _logs.length,
+                  itemBuilder: (_, index) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(_logs[index]),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

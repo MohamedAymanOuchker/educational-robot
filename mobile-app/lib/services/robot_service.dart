@@ -1,337 +1,210 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum ConnectionType { bluetooth, wifi }
+import 'robot_client.dart';
+import 'device_discovery.dart';
+import 'robot_connection.dart';
+import 'robot_protocol.dart';
+export 'robot_client.dart';
 
-enum ConnectionStatus { disconnected, connecting, connected, error }
-
-class RobotService {
+class RobotService implements RobotClient, RobotConnection {
   static final RobotService _instance = RobotService._internal();
   factory RobotService() => _instance;
-  RobotService._internal();
+  RobotService._internal() {
+    _protocol = RobotProtocol(
+      write: (bytes) {
+        final characteristic = _commandCharacteristic;
+        if (characteristic == null) throw StateError('Robot is disconnected');
+        // FBP serializes native writes. Retain their futures after protocol
+        // cancellation so no queued write can cross a reconnect boundary.
+        late Future<void> pending;
+        pending = characteristic
+            .write(bytes, withoutResponse: false, timeout: 5)
+            .whenComplete(() => _nativeWrites.remove(pending));
+        _nativeWrites.add(pending);
+        return pending;
+      },
+      onStopUnconfirmed: _closeConnection,
+    );
+  }
 
-  // UUIDs for ESP32 communication (you can customize these)
-  static const String SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
+  static const String SERVICE_UUID = '12345678-1234-1234-1234-123456789abc';
   static const String COMMAND_CHAR_UUID =
-      "12345678-1234-1234-1234-123456789abd";
-  static const String SENSOR_CHAR_UUID = "12345678-1234-1234-1234-123456789abe";
+      '12345678-1234-1234-1234-123456789abd';
+  static const String SENSOR_CHAR_UUID = '12345678-1234-1234-1234-123456789abe';
 
-  // Connection state
-  ConnectionType? _connectionType;
-  ConnectionStatus _status = ConnectionStatus.disconnected;
+  late final RobotProtocol _protocol;
+  late final DeviceDiscovery<ScanResult> _discovery = DeviceDiscovery(
+    prepare: () async {
+      if (!await requestPermissions()) {
+        throw StateError(
+          'Bluetooth permissions not granted. Check app permissions in Android settings.',
+        );
+      }
+      if (!await FlutterBluePlus.isSupported)
+        throw StateError('Bluetooth is unavailable.');
+      if (await FlutterBluePlus.adapterState.first !=
+          BluetoothAdapterState.on) {
+        throw StateError('Turn on Bluetooth before scanning.');
+      }
+    },
+    start: () => FlutterBluePlus.startScan(
+      withServices: [Guid(SERVICE_UUID)],
+      timeout: const Duration(seconds: 10),
+    ),
+    stop: FlutterBluePlus.stopScan,
+    results: () => FlutterBluePlus.onScanResults,
+  );
   BluetoothDevice? _bluetoothDevice;
   BluetoothCharacteristic? _commandCharacteristic;
-  BluetoothCharacteristic? _sensorCharacteristic;
-  String? _wifiIp;
-  Timer? _sensorTimer;
+  StreamSubscription<List<int>>? _notificationSubscription;
+  StreamSubscription<BluetoothConnectionState>? _deviceSubscription;
+  final Set<Future<void>> _nativeWrites = {};
+  Future<void>? _disconnectFuture;
+  Future<void>? _closeFuture;
+  bool _connecting = false;
 
-  // Stream controllers
-  final _connectionStatusController =
-      StreamController<ConnectionStatus>.broadcast();
-  final _sensorDataController =
-      StreamController<Map<String, dynamic>>.broadcast();
-  final _commandResponseController = StreamController<String>.broadcast();
-
-  // Getters
-  Stream<ConnectionStatus> get connectionStatus =>
-      _connectionStatusController.stream;
-  Stream<Map<String, dynamic>> get sensorData => _sensorDataController.stream;
-  Stream<String> get commandResponse => _commandResponseController.stream;
-  ConnectionStatus get status => _status;
-  ConnectionType? get connectionType => _connectionType;
-  bool get isConnected => _status == ConnectionStatus.connected;
+  @override
+  Stream<ConnectionStatus> get connectionStatus => _protocol.connectionStatus;
+  @override
+  Stream<Map<String, dynamic>> get sensorData => _protocol.sensorData;
+  @override
+  Stream<String> get commandResponse => _protocol.commandResponse;
+  @override
+  Stream<String> get faults => _protocol.faults;
+  @override
+  ConnectionStatus get status => _protocol.status;
+  @override
+  bool get isConnected => _protocol.isConnected;
+  @override
   BluetoothDevice? get connectedBluetoothDevice => _bluetoothDevice;
-  String? get connectedWifiIp => _wifiIp;
+  Map<String, dynamic> get lastSensorData => _protocol.lastSensorData;
 
-  // Request permissions for Bluetooth
   Future<bool> requestPermissions() async {
-    Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetooth,
+    final statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.location,
     ].request();
-
     return statuses.values.every((status) => status.isGranted);
   }
 
-  // Scan for Bluetooth devices
-  Stream<List<ScanResult>> scanForDevices() async* {
-    try {
-      bool permissionsGranted = await requestPermissions();
-      if (!permissionsGranted) {
-        throw Exception('Bluetooth permissions not granted');
-      }
+  @override
+  Stream<List<ScanResult>> scanForDevices() => _discovery.scan();
 
-      // Check if Bluetooth is available and on
-      if (await FlutterBluePlus.isSupported == false) {
-        throw Exception('Bluetooth not available');
-      }
+  @override
+  Future<void> stopScan() => _discovery.stopScanning();
 
-      if (await FlutterBluePlus.adapterState.first != BluetoothAdapterState.on) {
-        throw Exception('Bluetooth is turned off');
-      }
-
-      // Start scanning with timeout
-      await FlutterBluePlus.startScan(
-        timeout: Duration(seconds: 10),
-        withServices: [], // Can filter by service UUIDs if needed
-      );
-
-      yield* FlutterBluePlus.scanResults;
-    } catch (e) {
-      print('Error scanning for devices: $e');
-      yield [];
-    }
-  }
-
-  // Connect via Bluetooth
+  @override
   Future<bool> connectBluetooth(BluetoothDevice device) async {
+    if (_connecting) return false;
+    _connecting = true;
     try {
-      _updateStatus(ConnectionStatus.connecting);
-
-      // Connect to device
-      await device.connect(timeout: Duration(seconds: 10));
-
-      // Discover services
-      List<BluetoothService> services = await device.discoverServices();
-
-      BluetoothService? targetService;
-      for (var service in services) {
-        if (service.uuid.toString().toLowerCase() ==
-            SERVICE_UUID.toLowerCase()) {
-          targetService = service;
-          break;
-        }
-      }
-
-      if (targetService == null) {
-        throw Exception(
-            'Robot service not found. Make sure your ESP32 is running the correct firmware.');
-      }
-
-      // Find characteristics
-      for (var characteristic in targetService.characteristics) {
-        String charUuid = characteristic.uuid.toString().toLowerCase();
-
-        if (charUuid == COMMAND_CHAR_UUID.toLowerCase()) {
-          _commandCharacteristic = characteristic;
-        } else if (charUuid == SENSOR_CHAR_UUID.toLowerCase()) {
-          _sensorCharacteristic = characteristic;
-          // Enable notifications for sensor data
-          await characteristic.setNotifyValue(true);
-          characteristic.lastValueStream.listen(_handleSensorData);
-        }
-      }
-
-      if (_commandCharacteristic == null) {
-        throw Exception('Command characteristic not found');
-      }
-
-      _bluetoothDevice = device;
-      _connectionType = ConnectionType.bluetooth;
-      _updateStatus(ConnectionStatus.connected);
-
-      // Start periodic sensor reading if sensor characteristic is available
-      if (_sensorCharacteristic != null) {
-        _startSensorReading();
-      }
-
-      print('Successfully connected to ${device.platformName}');
-      return true;
-    } catch (e) {
-      print('Bluetooth connection error: $e');
-      _updateStatus(ConnectionStatus.error);
       await disconnect();
-      return false;
-    }
-  }
-
-  // Connect via WiFi (basic TCP socket implementation)
-  Future<bool> connectWifi(String ip, {int port = 80}) async {
-    try {
-      _updateStatus(ConnectionStatus.connecting);
-
-      // TODO: Implement TCP socket connection to ESP32
-      // This would require additional dependencies like socket_io_client
-      // For now, we'll focus on Bluetooth which is more common for robotics
-
-      throw UnimplementedError(
-          'WiFi connection not yet implemented. Please use Bluetooth.');
-    } catch (e) {
-      print('WiFi connection error: $e');
-      _updateStatus(ConnectionStatus.error);
-      return false;
-    }
-  }
-
-  // Disconnect from device
-  Future<void> disconnect() async {
-    try {
-      _sensorTimer?.cancel();
-
-      if (_bluetoothDevice != null) {
-        await _bluetoothDevice!.disconnect();
-      }
-
-      _bluetoothDevice = null;
-      _commandCharacteristic = null;
-      _sensorCharacteristic = null;
-      _wifiIp = null;
-      _connectionType = null;
-      _updateStatus(ConnectionStatus.disconnected);
-
-      print('Disconnected from robot');
-    } catch (e) {
-      print('Error during disconnect: $e');
-    }
-  }
-
-  // Send command to robot
-  Future<bool> sendCommand(String command) async {
-    if (!isConnected || _commandCharacteristic == null) {
-      print('Cannot send command: not connected or no command characteristic');
-      return false;
-    }
-
-    try {
-      // Add newline terminator for ESP32 parsing
-      String fullCommand = command + '\n';
-      List<int> bytes = utf8.encode(fullCommand);
-
-      await _commandCharacteristic!.write(bytes, withoutResponse: false);
-      print('Sent command: $command');
-
-      // Notify listeners
-      _commandResponseController.add('Command sent: $command');
-
-      return true;
-    } catch (e) {
-      print('Error sending command: $e');
-      return false;
-    }
-  }
-
-  // Send movement command with distance/angle
-  Future<bool> sendMovementCommand(String direction,
-      {double value = 100}) async {
-    String command = '$direction:${value.toInt()}';
-    return await sendCommand(command);
-  }
-
-  // Specific movement commands
-  Future<bool> moveForward(double distance) =>
-      sendMovementCommand('FORWARD', value: distance);
-  Future<bool> moveBackward(double distance) =>
-      sendMovementCommand('BACKWARD', value: distance);
-  Future<bool> turnLeft(double angle) =>
-      sendMovementCommand('LEFT', value: angle);
-  Future<bool> turnRight(double angle) =>
-      sendMovementCommand('RIGHT', value: angle);
-  Future<bool> stopRobot() => sendCommand('STOP');
-  Future<bool> autoNavigate() => sendCommand('AUTO_NAV');
-
-  // Request sensor data
-  Future<bool> requestSensorData() async {
-    return await sendCommand('GET_SENSORS');
-  }
-
-  // Get distance reading
-  Future<double?> getDistance() async {
-    if (await sendCommand('GET_DISTANCE')) {
-      // Wait a bit for response and return last known distance
-      await Future.delayed(Duration(milliseconds: 100));
-      return _lastSensorData['distance'];
-    }
-    return null;
-  }
-
-  // Handle incoming sensor data
-  Map<String, dynamic> _lastSensorData = {};
-
-  void _handleSensorData(List<int> data) {
-    try {
-      String message = utf8.decode(data).trim();
-      print('Received sensor data: $message');
-
-      // Parse JSON format: {"distance": 25.5, "battery": 87.2, "heading": 180}
-      if (message.startsWith('{') && message.endsWith('}')) {
-        Map<String, dynamic> sensorData = json.decode(message);
-        _lastSensorData = sensorData;
-        _sensorDataController.add(sensorData);
-      } else {
-        // Parse simple format: "D:25.5,B:87.2,H:180"
-        Map<String, dynamic> sensorValues = {};
-        message.split(',').forEach((item) {
-          var parts = item.split(':');
-          if (parts.length == 2) {
-            double? value = double.tryParse(parts[1]);
-            if (value != null) {
-              switch (parts[0].trim()) {
-                case 'D':
-                  sensorValues['distance'] = value;
-                  break;
-                case 'B':
-                  sensorValues['battery'] = value;
-                  break;
-                case 'H':
-                  sensorValues['heading'] = value;
-                  break;
-                case 'T':
-                  sensorValues['temperature'] = value;
-                  break;
-              }
-            }
-          }
-        });
-
-        if (sensorValues.isNotEmpty) {
-          _lastSensorData = sensorValues;
-          _sensorDataController.add(sensorValues);
+      // Never reconnect while a cancelled native write could still be queued.
+      // If native I/O remains stuck, fail setup instead of reopening that link.
+      await Future.wait(
+        _nativeWrites.toList().map((write) => write.catchError((Object _) {})),
+      ).timeout(const Duration(seconds: 15));
+      _protocol.setStatus(ConnectionStatus.connecting);
+      _bluetoothDevice = device;
+      await stopScan();
+      await device.connect(timeout: const Duration(seconds: 10));
+      _deviceSubscription = device.connectionState.listen((state) {
+        if (state == BluetoothConnectionState.disconnected) {
+          _protocol.setStatus(ConnectionStatus.disconnected);
+          _commandCharacteristic = null;
+          unawaited(_notificationSubscription?.cancel());
+          _notificationSubscription = null;
+        }
+      });
+      final services = await device.discoverServices();
+      BluetoothCharacteristic? sensor;
+      for (final service in services) {
+        if (service.uuid.toString().toLowerCase() != SERVICE_UUID) continue;
+        for (final characteristic in service.characteristics) {
+          final uuid = characteristic.uuid.toString().toLowerCase();
+          if (uuid == COMMAND_CHAR_UUID)
+            _commandCharacteristic = characteristic;
+          if (uuid == SENSOR_CHAR_UUID) sensor = characteristic;
         }
       }
-    } catch (e) {
-      print('Error parsing sensor data: $e');
+      if (_commandCharacteristic == null || sensor == null) {
+        throw StateError(
+          'Robot command and notification characteristics are required',
+        );
+      }
+      // onValueReceived does not replay a response from a previous connection.
+      _notificationSubscription = sensor.onValueReceived.listen(
+        _protocol.receive,
+      );
+      await sensor.setNotifyValue(true);
+      if (!device.isConnected)
+        throw StateError('Robot disconnected during setup');
+      _protocol.setStatus(ConnectionStatus.connected);
+      // Verify the protocol and establish a stopped state before allowing use.
+      if (!await stopRobot())
+        throw StateError('Robot did not acknowledge STOP');
+      return true;
+    } catch (_) {
+      try {
+        await disconnect();
+      } catch (_) {
+        // Keep the device reference for a later disconnect retry.
+      }
+      _protocol.setStatus(ConnectionStatus.error);
+      return false;
+    } finally {
+      _connecting = false;
     }
   }
 
-  // Start periodic sensor reading
-  void _startSensorReading() {
-    _sensorTimer = Timer.periodic(Duration(seconds: 1), (timer) {
-      if (isConnected) {
-        requestSensorData();
-      } else {
-        timer.cancel();
-      }
-    });
-  }
+  @override
+  Future<void> disconnect() => _disconnectFuture ??= () async {
+    if (isConnected) await stopRobot();
+    await _closeConnection();
+  }().whenComplete(() => _disconnectFuture = null);
 
-  // Update connection status and notify listeners
-  void _updateStatus(ConnectionStatus status) {
-    _status = status;
-    _connectionStatusController.add(_status);
-  }
+  Future<void> _closeConnection() => _closeFuture ??= () async {
+    _protocol.setStatus(ConnectionStatus.disconnected);
+    _commandCharacteristic = null;
+    await _notificationSubscription?.cancel();
+    await _deviceSubscription?.cancel();
+    _notificationSubscription = null;
+    _deviceSubscription = null;
+    final device = _bluetoothDevice;
+    if (device != null) {
+      // Bypass the native write mutex: a lost STOP response must still trigger
+      // the firmware's disconnect fail-safe, even if an earlier write is stuck.
+      await device.disconnect(queue: false, timeout: 5);
+    }
+    _bluetoothDevice = null;
+  }().whenComplete(() => _closeFuture = null);
 
-  // Get available WiFi networks (placeholder for ESP32 AP mode)
-  Future<List<String>> getAvailableWifiNetworks() async {
-    // This would typically scan for WiFi networks or get them from ESP32
-    return [
-      'RoboBot-AP',
-      'ESP32-Robot',
-      'Arduino-Bot',
-    ];
-  }
+  Future<bool> sendCommand(String command) => _protocol.sendCommand(command);
+  Future<bool> sendMovementCommand(String direction, {double value = 100}) =>
+      _protocol.sendMovementCommand(direction, value: value);
+  @override
+  Future<bool> moveForward(double distance) => _protocol.moveForward(distance);
+  @override
+  Future<bool> moveBackward(double distance) =>
+      _protocol.moveBackward(distance);
+  @override
+  Future<bool> turnLeft(double angle) => _protocol.turnLeft(angle);
+  @override
+  Future<bool> turnRight(double angle) => _protocol.turnRight(angle);
+  @override
+  Future<bool> stopRobot() => _protocol.stopRobot();
+  @override
+  Future<bool> autoNavigate() => _protocol.autoNavigate();
+  Future<bool> requestSensorData() => _protocol.requestSensorData();
+  @override
+  Future<double?> getDistance() => _protocol.getDistance();
 
-  // Dispose resources
-  void dispose() {
-    _sensorTimer?.cancel();
-    _connectionStatusController.close();
-    _sensorDataController.close();
-    _commandResponseController.close();
+  Future<void> dispose() async {
+    await stopScan();
+    await disconnect();
+    _protocol.dispose();
   }
-
-  // Get last known sensor values
-  Map<String, dynamic> get lastSensorData => Map.from(_lastSensorData);
 }

@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <cmath>
 
 // NVS namespace for persisted IMU calibration
 static const char* CALIB_NAMESPACE = "imucal";
@@ -12,12 +13,15 @@ SensorManager sensorManager;
 SensorManager::SensorManager() 
   : yaw(0.0),
     lastIMUUpdate(0),
-    currentDistance(MAX_DISTANCE),
+    sensorData{},
+    lastRangeTrigger(0),
     axOffset(0), ayOffset(0), azOffset(0),
     gxOffset(0), gyOffset(0), gzOffset(0),
     ultrasonicMutex(nullptr),
     imuMutex(nullptr),
     recalibrateRequested(false) {
+  sensorData.distance = NAN;
+  sensorData.temperature = 20.0;
 }
 
 void SensorManager::begin() {
@@ -101,6 +105,7 @@ void SensorManager::calibrateIMU() {
   gzOffset = gzSum / samples;
 
   Serial.println("IMU calibration complete");
+  lastIMUUpdate = millis();
 
   // Persist so subsequent boots can skip this routine
   saveCalibration();
@@ -165,6 +170,13 @@ float SensorManager::readDistanceCM() {
     xSemaphoreTake(ultrasonicMutex, portMAX_DELAY);
   }
 
+  // HC-SR04 needs spacing between triggers, including navigation's direct reads.
+  unsigned long elapsed = millis() - lastRangeTrigger;
+  if (lastRangeTrigger && elapsed < SENSOR_UPDATE_RATE) {
+    delay(SENSOR_UPDATE_RATE - elapsed);
+  }
+  lastRangeTrigger = millis();
+
   // Send trigger pulse
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(2);
@@ -175,22 +187,27 @@ float SensorManager::readDistanceCM() {
   // Read echo pulse with timeout
   long duration = pulseIn(ECHO_PIN, HIGH, ULTRASONIC_TIMEOUT);
 
-  float result = MAX_DISTANCE;
+  float result = NAN;
   if (duration != 0) {
     // Temperature-compensated speed of sound: 331.3 + 0.606*T m/s, expressed
     // as cm/us (/10000). sensorData.temperature is the cached MPU die temp
     // (an approximation of ambient) refreshed by the sensor task, so we avoid
     // a cross-core I2C read here.
-    float speedCmPerUs = (331.3 + 0.606 * sensorData.temperature) / 10000.0;
+    float speedCmPerUs = (331.3 + 0.606 * getSensorData().temperature) / 10000.0;
     float distance = duration * speedCmPerUs / 2.0;
 
     // Validate reading; only a valid sample updates the cached distance
     if (distance >= 2.0 && distance <= 400.0) {
-      currentDistance = distance;
       result = distance;
     }
   }
 
+  // A failed echo invalidates the cached reading immediately; it is never 999cm clear space.
+  portENTER_CRITICAL(&dataMux);
+  sensorData.distance = result;
+  sensorData.distanceValid = std::isfinite(result);
+  if (sensorData.distanceValid) sensorData.distanceTimestamp = millis();
+  portEXIT_CRITICAL(&dataMux);
   if (ultrasonicMutex != nullptr) {
     xSemaphoreGive(ultrasonicMutex);
   }
@@ -198,11 +215,17 @@ float SensorManager::readDistanceCM() {
 }
 
 float SensorManager::getCurrentDistance() const {
-  return currentDistance;
+  const SensorData data = getSensorData();
+  return data.distanceValid ? data.distance : NAN;
+}
+
+bool SensorManager::isDistanceValid() const {
+  return getSensorData().distanceValid;
 }
 
 bool SensorManager::isObstacleDetected() const {
-  return currentDistance < MIN_OBSTACLE_DIST;
+  const SensorData data = getSensorData();
+  return !data.distanceValid || data.distance < MIN_OBSTACLE_DIST;
 }
 
 void SensorManager::integrateYaw() {
@@ -219,15 +242,16 @@ void SensorManager::integrateYaw() {
   // Apply calibration offset
   gz -= gzOffset;
 
-  float dt = (now - lastIMUUpdate) / 1000.0;
+  // Avoid integrating a boot/calibration pause as if one rate sample covered it.
+  float dt = lastIMUUpdate ? (now - lastIMUUpdate) / 1000.0 : 0.0;
   lastIMUUpdate = now;
 
   // Simple gyroscope integration
   yaw += (gz / 131.0) * dt; // 131.0 LSB/°/s for ±250°/s range
 
   // Normalize yaw to 0-360 degrees
-  if (yaw > 360.0) yaw -= 360.0;
-  if (yaw < 0.0) yaw += 360.0;
+  while (yaw >= 360.0) yaw -= 360.0;
+  while (yaw < 0.0) yaw += 360.0;
 }
 
 void SensorManager::updateYaw() {
@@ -250,11 +274,17 @@ void SensorManager::updateIMU() {
 }
 
 float SensorManager::getYaw() const {
-  return yaw;
+  if (imuMutex != nullptr) xSemaphoreTake(imuMutex, portMAX_DELAY);
+  const float result = yaw;
+  if (imuMutex != nullptr) xSemaphoreGive(imuMutex);
+  return result;
 }
 
 void SensorManager::resetYaw() {
+  if (imuMutex != nullptr) xSemaphoreTake(imuMutex, portMAX_DELAY);
   yaw = 0.0;
+  lastIMUUpdate = millis();
+  if (imuMutex != nullptr) xSemaphoreGive(imuMutex);
   Serial.println("Yaw reset to 0");
 }
 
@@ -285,27 +315,42 @@ float SensorManager::readBatteryPercent() {
 }
 
 void SensorManager::updateSensorData() {
-  // Refresh temperature first so readDistanceCM() uses a current value
-  sensorData.temperature = getTemperature();
-  sensorData.distance = readDistanceCM();
+  const float temperature = getTemperature();
+  const float battery = readBatteryPercent();
   updateIMU();
-  sensorData.heading = yaw;
-  sensorData.batteryLevel = readBatteryPercent();
+  const float heading = getYaw();
+  portENTER_CRITICAL(&dataMux);
+  sensorData.temperature = temperature;
+  sensorData.heading = heading;
+  sensorData.batteryLevel = battery;
   sensorData.timestamp = millis();
+  portEXIT_CRITICAL(&dataMux);
+  readDistanceCM();
 }
 
 SensorData SensorManager::getSensorData() const {
-  return sensorData;
+  portENTER_CRITICAL(&dataMux);
+  SensorData result = sensorData;
+  portEXIT_CRITICAL(&dataMux);
+  result.distanceAgeMs = millis() - result.distanceTimestamp;
+  result.distanceValid = result.distanceValid && result.distanceAgeMs <= DISTANCE_MAX_AGE_MS;
+  if (!result.distanceValid) result.distance = NAN;
+  return result;
 }
 
 String SensorManager::getSensorDataJSON() {
-  StaticJsonDocument<200> doc;
+  const SensorData data = getSensorData();
+  StaticJsonDocument<384> doc;
   
-  doc["distance"] = sensorData.distance;
-  doc["battery"] = sensorData.batteryLevel;
-  doc["temperature"] = sensorData.temperature;
-  doc["heading"] = sensorData.heading;
-  doc["timestamp"] = sensorData.timestamp;
+  doc["type"] = "telemetry";
+  if (data.distanceValid) doc["distance"] = data.distance;
+  else doc["distance"] = nullptr;
+  doc["distance_valid"] = data.distanceValid;
+  doc["distance_age_ms"] = data.distanceAgeMs;
+  doc["battery"] = data.batteryLevel;
+  doc["temperature"] = data.temperature;
+  doc["heading"] = data.heading;
+  doc["timestamp"] = data.timestamp;
   
   String output;
   serializeJson(doc, output);
@@ -318,7 +363,7 @@ float SensorManager::getFilteredDistance(int samples) {
   
   for (int i = 0; i < samples; i++) {
     float reading = readDistanceCM();
-    if (reading < MAX_DISTANCE) {
+    if (std::isfinite(reading)) {
       total += reading;
       validReadings++;
     }
@@ -326,7 +371,7 @@ float SensorManager::getFilteredDistance(int samples) {
   }
   
   if (validReadings == 0) {
-    return MAX_DISTANCE;
+    return NAN;
   }
   
   return total / validReadings;
@@ -334,7 +379,9 @@ float SensorManager::getFilteredDistance(int samples) {
 
 bool SensorManager::isMoving() {
   int16_t ax, ay, az;
+  if (imuMutex != nullptr) xSemaphoreTake(imuMutex, portMAX_DELAY);
   imu.getAcceleration(&ax, &ay, &az);
+  if (imuMutex != nullptr) xSemaphoreGive(imuMutex);
   
   // Simple motion detection based on acceleration variance
   static int16_t lastAx = 0, lastAy = 0, lastAz = 0;
@@ -358,8 +405,8 @@ bool SensorManager::isMoving() {
 
 void SensorManager::printSensorStatus() {
   Serial.println("=== Sensor Status ===");
-  Serial.printf("Distance: %.2f cm\n", currentDistance);
-  Serial.printf("Heading: %.2f degrees\n", yaw);
+  Serial.printf("Distance: %.2f cm\n", getCurrentDistance());
+  Serial.printf("Heading: %.2f degrees\n", getYaw());
   Serial.printf("Temperature: %.2f C\n", getTemperature());
   Serial.printf("Obstacle detected: %s\n", isObstacleDetected() ? "YES" : "NO");
   Serial.printf("Robot moving: %s\n", isMoving() ? "YES" : "NO");
@@ -373,7 +420,7 @@ bool SensorManager::testAllSensors() {
   
   // Test ultrasonic sensor
   float distance = readDistanceCM();
-  if (distance >= MAX_DISTANCE) {
+  if (!std::isfinite(distance)) {
     Serial.println("Ultrasonic sensor test FAILED");
     allPassed = false;
   } else {

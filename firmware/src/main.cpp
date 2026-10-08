@@ -180,116 +180,73 @@ void motorTask(void *parameter) {
 }
 
 void sensorTask(void *parameter) {
-  Serial.println("Sensor task started on Core 0");
-  
+  unsigned long lastRange = 0;
   while (true) {
-    // Run any pending IMU recalibration here so all I2C access stays on one core
-    sensorManager.serviceRecalibration();
-
-    // Update sensor readings
-    sensorManager.updateSensorData();
-
-    // Update IMU data
     sensorManager.updateIMU();
-    
-    // Broadcast telemetry if connected
-    if (bleManager.isConnected()) {
-      SensorData data = sensorManager.getSensorData();
-      bleManager.sendTelemetry(data);
+    if (millis() - lastRange >= SENSOR_UPDATE_RATE) {
+      lastRange = millis();
+      sensorManager.updateSensorData();
     }
-    
-    // Task delay (1Hz sensor updates)
-    vTaskDelay(pdMS_TO_TICKS(SENSOR_UPDATE_RATE));
+    vTaskDelay(pdMS_TO_TICKS(IMU_UPDATE_RATE));
   }
 }
 
 void communicationTask(void *parameter) {
-  Serial.println("Communication task started on Core 0");
-  
   while (true) {
-    // Handle any communication-specific tasks
-    // (Most BLE handling is done in callbacks)
-    
-    // Print connection status periodically
-    static unsigned long lastStatusPrint = 0;
-    if (millis() - lastStatusPrint > 30000) { // Every 30 seconds
-      lastStatusPrint = millis();
-      bleManager.printConnectionStatus();
-    }
-    
-    vTaskDelay(pdMS_TO_TICKS(1000)); // 1 second delay
+    // Notification transmission never delays the safety sensor sampling task.
+    if (bleManager.isConnected()) bleManager.sendTelemetry(sensorManager.getSensorData());
+    vTaskDelay(pdMS_TO_TICKS(TELEMETRY_UPDATE_RATE));
   }
 }
 
 void executeCommand(const Command& cmd) {
-  Serial.printf("Executing command: %c%d\n", cmd.type, cmd.value);
-
-  // A new explicit movement command re-arms motion after any prior stop
-  if (cmd.type == 'F' || cmd.type == 'B' || cmd.type == 'L' || cmd.type == 'R') {
-    motorController.clearStop();
+  if (cmd.type == '?') return; // empty queue is not a STOP command
+  if (cmd.generation != motorController.getGeneration()) {
+    bleManager.sendCommandResult(cmd.id, "cancelled", "superseded by stop");
+    return;
   }
-
-  switch (cmd.type) {
-    case 'F': // Forward
-      currentState = MOVING_FORWARD;
-      motorController.moveForward(cmd.value);
-      currentState = IDLE;
-      break;
-      
-    case 'B': // Backward
-      currentState = MOVING_BACKWARD;
-      motorController.moveBackward(cmd.value);
-      currentState = IDLE;
-      break;
-      
-    case 'L': // Left turn
-      currentState = TURNING_LEFT;
-      motorController.rotateLeft(cmd.value);
-      currentState = IDLE;
-      break;
-      
-    case 'R': // Right turn
-      currentState = TURNING_RIGHT;
-      motorController.rotateRight(cmd.value);
-      currentState = IDLE;
-      break;
-      
-    case 'S': // Stop
-      currentState = IDLE;
-      motorController.stopMoving();
-      navigator.disableAutonomousMode();
-      break;
-      
-    case 'A': // Autonomous mode
-      if (cmd.value == 1) {
-        currentState = AUTONOMOUS;
-        navigator.enableAutonomousMode();
-      } else {
-        currentState = IDLE;
-        navigator.disableAutonomousMode();
-      }
-      break;
-
-    case 'C': // Recalibrate IMU (deferred to sensor task; robot must be still)
-      currentState = IDLE;
-      motorController.stopMoving();
-      navigator.disableAutonomousMode();
-      sensorManager.requestRecalibration();
-      break;
-
-    case 'K': // Toggle closed-loop (IMU-based) turning (experimental)
-      motorController.setClosedLoop(cmd.value == 1);
-      break;
-
-    default:
-      Serial.printf("Unknown command type: %c\n", cmd.type);
-      break;
+  if (cmd.type == 'K' && cmd.value == 0) {
+    bleManager.sendCommandResult(cmd.id, "done"); // open-loop is always used in P1
+    return;
   }
-  
-  // Send status update
-  if (bleManager.isConnected()) {
-    String status = "Command executed: " + String(cmd.type) + String(cmd.value);
-    bleManager.sendStatus(status);
+  const bool movement = cmd.type == 'F' || cmd.type == 'B' || cmd.type == 'L' || cmd.type == 'R';
+  if (!movement && !(cmd.type == 'A' && cmd.value == 1)) {
+    bleManager.sendCommandResult(cmd.id, "error", "unsupported queued command");
+    return;
+  }
+  // The generation check and rearming are atomic with STOP and coil writes.
+  if (!motorController.arm(cmd.generation)) {
+    bleManager.sendCommandResult(cmd.id, "cancelled", "superseded by stop");
+    return;
+  }
+  MotionResult result = MotionResult::Done;
+  if (cmd.type == 'A') {
+    if (!sensorManager.isDistanceValid()) result = MotionResult::SensorInvalid;
+    else {
+      currentState = AUTONOMOUS;
+      navigator.enableAutonomousMode();
+    }
+  } else {
+    navigator.disableAutonomousMode();
+    switch (cmd.type) {
+      case 'F': currentState = MOVING_FORWARD; result = motorController.moveForward(cmd.value); break;
+      case 'B': currentState = MOVING_BACKWARD; result = motorController.moveBackward(cmd.value); break;
+      case 'L': currentState = TURNING_LEFT; result = motorController.rotateLeft(cmd.value); break;
+      case 'R': currentState = TURNING_RIGHT; result = motorController.rotateRight(cmd.value); break;
+    }
+    currentState = IDLE;
+  }
+  if (cmd.generation != motorController.getGeneration() || result == MotionResult::Cancelled) {
+    bleManager.sendCommandResult(cmd.id, "cancelled", "stopped during command");
+  } else if (result == MotionResult::Done) {
+    bleManager.sendCommandResult(cmd.id, "done");
+  } else {
+    // Failed motion must not be followed by the remainder of a queued program.
+    const char* reason = result == MotionResult::Blocked ? "obstacle detected" :
+      result == MotionResult::SensorInvalid ? "distance unavailable or stale" : "motion timed out";
+    bleManager.stopAll(reason);
+    currentState = IDLE;
+    bleManager.sendCommandResult(cmd.id, "error", reason);
   }
 }
 
@@ -313,7 +270,7 @@ void handleSystemError(const String& error) {
   Serial.printf("SYSTEM ERROR: %s\n", error.c_str());
   
   // Stop all motors
-  motorController.emergencyStop();
+  bleManager.stopAll("system error");
   
   // Disable autonomous mode
   navigator.disableAutonomousMode();

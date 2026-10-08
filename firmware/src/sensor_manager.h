@@ -14,8 +14,9 @@ private:
   MPU6050 imu;
   float yaw;
   unsigned long lastIMUUpdate;
-  float currentDistance;
   SensorData sensorData;
+  mutable portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
+  unsigned long lastRangeTrigger;
   
   // IMU calibration values
   int16_t axOffset, ayOffset, azOffset;
@@ -56,6 +57,7 @@ public:
   // Distance sensor functions
   float readDistanceCM();
   float getCurrentDistance() const;
+  bool isDistanceValid() const;
   bool isObstacleDetected() const;
   
   // IMU functions

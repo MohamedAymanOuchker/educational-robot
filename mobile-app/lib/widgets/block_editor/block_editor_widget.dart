@@ -1,35 +1,44 @@
+import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import '../../widgets/block_editor/block_types.dart';
-import '../../widgets/block_editor/block_widget.dart';
+import 'block_types.dart';
+import 'block_widget.dart';
 import '../../services/levels_service.dart';
 
 class BlockEditorWidget extends StatefulWidget {
-  final Function(List<Block>) onSave;
-  final Function(List<Block>) onRun;
+  final FutureOr<void> Function(List<Block>) onSave;
+  final FutureOr<void> Function(List<Block>) onRun;
+  final Future<List<Block>?> Function(List<Block>)? onOpen;
+  final Future<bool> Function(List<Block>)? confirmClear;
+  final List<Block> initialBlocks;
   final VoidCallback onClear;
   final int currentLevel;
 
   const BlockEditorWidget({
-    Key? key,
+    super.key,
     required this.onSave,
     required this.onRun,
     required this.onClear,
     required this.currentLevel,
-  }) : super(key: key);
+    this.onOpen,
+    this.confirmClear,
+    this.initialBlocks = const [],
+  });
 
   @override
-  _BlockEditorWidgetState createState() => _BlockEditorWidgetState();
+  State<BlockEditorWidget> createState() => _BlockEditorWidgetState();
 }
 
 class _BlockEditorWidgetState extends State<BlockEditorWidget> {
-  List<Block> workspaceBlocks = [];
-  Block? selectedBlock;
+  final List<Block> workspaceBlocks = [];
+  final _workspaceKey = GlobalKey();
   List<Block> toolboxBlocks = [];
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
+    workspaceBlocks.addAll(widget.initialBlocks.map((block) => block.clone()));
     _initializeToolboxBlocks();
   }
 
@@ -42,267 +51,244 @@ class _BlockEditorWidgetState extends State<BlockEditorWidget> {
   }
 
   void _initializeToolboxBlocks() {
-    final level = LevelsService.getLevelById(widget.currentLevel);
-    final toolboxXml = level.toolboxXml;
-
-    // Parse toolbox XML to determine available blocks
-    toolboxBlocks = _parseToolboxXml(toolboxXml);
+    toolboxBlocks = [
+      for (final type in LevelsService.getLevelById(widget.currentLevel).blocks)
+        Block(type: type, position: Offset.zero, color: _colorForType(type)),
+    ];
   }
 
-  List<Block> _parseToolboxXml(String xml) {
-    List<Block> blocks = [];
-
-    // Movement blocks (blue)
-    if (xml.contains('type="move_forward"')) {
-      blocks.add(Block(
-        type: BlockType.moveForward,
-        position: Offset.zero,
-        color: Colors.blue,
-        canHaveChildren: false,
-      ));
+  Color _colorForType(BlockType type) {
+    switch (type) {
+      case BlockType.wait:
+        return Colors.orange;
+      case BlockType.ifDistance:
+        return Colors.purple;
+      case BlockType.stop:
+        return Colors.red;
+      case BlockType.autoNavigate:
+        return Colors.teal;
+      default:
+        return Colors.blue;
     }
-    if (xml.contains('type="move_backward"')) {
-      blocks.add(Block(
-        type: BlockType.moveBackward,
-        position: Offset.zero,
-        color: Colors.blue,
-        canHaveChildren: false,
-      ));
-    }
-    if (xml.contains('type="turn_left"')) {
-      blocks.add(Block(
-        type: BlockType.turnLeft,
-        position: Offset.zero,
-        color: Colors.blue,
-        canHaveChildren: false,
-      ));
-    }
-    if (xml.contains('type="turn_right"')) {
-      blocks.add(Block(
-        type: BlockType.turnRight,
-        position: Offset.zero,
-        color: Colors.blue,
-        canHaveChildren: false,
-      ));
-    }
-
-    // Control blocks (orange)
-    if (xml.contains('type="wait"')) {
-      blocks.add(Block(
-        type: BlockType.wait,
-        position: Offset.zero,
-        color: Colors.orange,
-        canHaveChildren: true,
-      ));
-    }
-
-    // Logic blocks (purple)
-    if (xml.contains('type="controls_if"')) {
-      blocks.add(Block(
-        type: BlockType.ifDistance,
-        position: Offset.zero,
-        color: Colors.purple,
-        canHaveChildren: true,
-      ));
-    }
-
-    // Stop block (red)
-    if (xml.contains('type="stop"')) {
-      blocks.add(Block(
-        type: BlockType.stop,
-        position: Offset.zero,
-        color: Colors.red,
-        canHaveChildren: false,
-      ));
-    }
-
-    // Auto blocks (teal)
-    if (xml.contains('type="auto_navigate"')) {
-      blocks.add(Block(
-        type: BlockType.autoNavigate,
-        position: Offset.zero,
-        color: Colors.teal,
-        canHaveChildren: false,
-      ));
-    }
-
-    return blocks;
   }
 
   void _handleBlockSnapped(Block block) {
-    setState(() {
-      // Remove the block from workspace blocks if it's being nested
-      workspaceBlocks.remove(block);
-    });
+    setState(
+      () => workspaceBlocks.removeWhere((root) => identical(root, block)),
+    );
   }
 
-  void _handleBlockUnsnapped(Block block) {
-    setState(() {
-      if (block.parent != null) {
-        block.parent!.children.remove(block);
-        block.parent = null;
-      }
-      workspaceBlocks.add(block);
-    });
-  }
-
-  Widget _buildToolboxBlock(Block block) {
-    return Draggable<Block>(
-      data: block,
-      feedback: Material(
-        elevation: 4.0,
-        child: Container(
-          padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          decoration: BoxDecoration(
-            color: block.color.withValues(alpha: 0.9),
-            borderRadius: BorderRadius.circular(8.0),
-          ),
-          child: Text(
-            block.getDisplayName(),
-            style: GoogleFonts.roboto(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+  Widget _buildToolboxBlock(Block template) {
+    return Padding(
+      padding: const EdgeInsets.all(6),
+      child: Tooltip(
+        message: 'Hold and drag into the workspace',
+        child: LongPressDraggable<Block>(
+          // The toolbox is a template. Each successful drop triggers a rebuild
+          // and the next drag gets a new independent model, including defaults.
+          data: template.clone(),
+          maxSimultaneousDrags: 1,
+          feedback: Material(
+            child: SizedBox(
+              width: 260,
+              child: BlockWidget(block: template, isDraggable: false),
             ),
           ),
+          childWhenDragging: Opacity(
+            opacity: 0.5,
+            child: BlockWidget(block: template, isDraggable: false),
+          ),
+          child: BlockWidget(block: template, isDraggable: false),
         ),
-      ),
-      childWhenDragging: Opacity(
-        opacity: 0.5,
-        child: BlockWidget(
-          block: block,
-          isDraggable: false,
-        ),
-      ),
-      child: BlockWidget(
-        block: block,
-        isDraggable: false,
-        onTap: null,
       ),
     );
   }
 
-  Widget _buildWorkspaceBlock(Block block) {
-    return BlockWidget(
-      key: ValueKey(block),
-      block: block,
-      onBlockSnapped: _handleBlockSnapped,
-      onBlockUnsnapped: _handleBlockUnsnapped,
-      onPositionChanged: (position) {
-        setState(() {
-          block.position = position;
-        });
+  Widget _buildWorkspace() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final blockWidth = math.min(300.0, constraints.maxWidth - 16);
+        final bottom = workspaceBlocks.fold<double>(
+          0,
+          (value, block) =>
+              math.max(value, block.position.dy + _blockHeight(block)),
+        );
+        final canvasHeight = math.max(
+          constraints.maxHeight,
+          math.max(1200.0, bottom + 200),
+        );
+        return SingleChildScrollView(
+          child: DragTarget<Block>(
+            onWillAcceptWithDetails: (_) => true,
+            onAcceptWithDetails: (details) {
+              final renderBox =
+                  _workspaceKey.currentContext!.findRenderObject() as RenderBox;
+              final local = renderBox.globalToLocal(details.offset);
+              final block = details.data;
+              setState(() {
+                block.detach();
+                workspaceBlocks.removeWhere((root) => identical(root, block));
+                block.position = Offset(
+                  local.dx.clamp(
+                    8.0,
+                    math.max(8.0, constraints.maxWidth - blockWidth - 8),
+                  ),
+                  local.dy.clamp(8.0, canvasHeight - 60),
+                );
+                workspaceBlocks.add(block);
+              });
+            },
+            builder: (context, candidates, rejected) => SizedBox(
+              key: _workspaceKey,
+              width: constraints.maxWidth,
+              height: canvasHeight,
+              child: Stack(
+                children: [
+                  Positioned.fill(child: CustomPaint(painter: GridPainter())),
+                  if (workspaceBlocks.isEmpty)
+                    const Positioned(
+                      top: 20,
+                      left: 16,
+                      right: 16,
+                      child: Text(
+                        'Hold a block, then drag it here.\nPrograms run from top to bottom.',
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+                  for (final block in workspaceBlocks)
+                    Positioned(
+                      key: ObjectKey(block),
+                      left: block.position.dx.clamp(
+                        0.0,
+                        math.max(0.0, constraints.maxWidth - blockWidth),
+                      ),
+                      top: block.position.dy,
+                      width: blockWidth,
+                      child: BlockWidget(
+                        block: block,
+                        onBlockSnapped: _handleBlockSnapped,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
       },
     );
   }
+
+  double _blockHeight(Block block) =>
+      80 +
+      (block.isContainer
+          ? block.children.fold<double>(
+              60,
+              (height, child) => height + _blockHeight(child),
+            )
+          : 0);
+
+  Future<void> _action(FutureOr<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  List<Block> _snapshot() =>
+      workspaceBlocks.map((block) => block.clone()).toList();
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Toolbar
-        Container(
-          padding: EdgeInsets.all(8.0),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.1),
-                blurRadius: 4.0,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
             children: [
               _buildToolbarButton(
                 icon: Icons.save_rounded,
                 label: 'Save',
                 color: Colors.green,
-                onPressed: () => widget.onSave(workspaceBlocks),
+                onPressed: () => _action(() => widget.onSave(_snapshot())),
               ),
+              if (widget.onOpen != null)
+                _buildToolbarButton(
+                  icon: Icons.folder_open,
+                  label: 'Open',
+                  color: Colors.blue,
+                  onPressed: () => _action(() async {
+                    final blocks = await widget.onOpen!(_snapshot());
+                    if (blocks != null && mounted) {
+                      setState(() {
+                        workspaceBlocks.clear();
+                        workspaceBlocks.addAll(
+                          blocks.map((block) => block.clone()),
+                        );
+                      });
+                    }
+                  }),
+                ),
               _buildToolbarButton(
                 icon: Icons.play_circle_filled,
                 label: 'Run',
                 color: Colors.orange,
-                onPressed: () => widget.onRun(workspaceBlocks),
+                onPressed: () => _action(
+                  () => widget.onRun(List<Block>.of(workspaceBlocks)),
+                ),
               ),
               _buildToolbarButton(
                 icon: Icons.delete,
                 label: 'Clear',
                 color: Colors.red,
-                onPressed: () {
-                  setState(() {
-                    workspaceBlocks.clear();
-                  });
+                onPressed: () => _action(() async {
+                  if (widget.confirmClear != null &&
+                      !await widget.confirmClear!(_snapshot()))
+                    return;
+                  if (!mounted) return;
+                  setState(() => workspaceBlocks.clear());
                   widget.onClear();
-                },
+                }),
               ),
             ],
           ),
         ),
-        // Editor Area
         Expanded(
-          child: Row(
-            children: [
-              // Toolbox Panel
-              Container(
-                width: 200,
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  borderRadius: BorderRadius.only(
-                    topRight: Radius.circular(16.0),
-                    bottomRight: Radius.circular(16.0),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 4.0,
-                      offset: Offset(2, 0),
-                    ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final narrow = constraints.maxWidth < 650;
+              final toolbox = ColoredBox(
+                color: Colors.grey.shade100,
+                child: ListView(
+                  scrollDirection: narrow ? Axis.horizontal : Axis.vertical,
+                  children: [
+                    for (final block in toolboxBlocks)
+                      SizedBox(
+                        width: narrow ? 230 : null,
+                        child: _buildToolboxBlock(block),
+                      ),
                   ],
                 ),
-                child: ListView(
-                  padding: EdgeInsets.symmetric(vertical: 8.0),
-                  children: toolboxBlocks.map(_buildToolboxBlock).toList(),
-                ),
-              ),
-              // Workspace Panel
-              Expanded(
-                child: DragTarget<Block>(
-                  builder: (context, candidateData, rejectedData) {
-                    return Container(
-                      color: Colors.white,
-                      child: Stack(
-                        children: [
-                          // Grid background
-                          CustomPaint(
-                            painter: GridPainter(),
-                            size: Size.infinite,
-                          ),
-                          // Blocks
-                          ...workspaceBlocks.map(_buildWorkspaceBlock),
-                        ],
-                      ),
-                    );
-                  },
-                  onWillAcceptWithDetails: (details) => true,
-                  onAcceptWithDetails: (details) {
-                    final block = details.data;
-                    setState(() {
-                      // Create a new block instance
-                      final newBlock = Block(
-                        type: block.type,
-                        position: block.position,
-                        color: block.color,
-                        canHaveChildren: block.canHaveChildren,
-                      );
-                      workspaceBlocks.add(newBlock);
-                    });
-                  },
-                ),
-              ),
-            ],
+              );
+              if (narrow) {
+                return Column(
+                  children: [
+                    SizedBox(height: 108, child: toolbox),
+                    Expanded(child: _buildWorkspace()),
+                  ],
+                );
+              }
+              return Row(
+                children: [
+                  SizedBox(width: 230, child: toolbox),
+                  Expanded(child: _buildWorkspace()),
+                ],
+              );
+            },
           ),
         ),
       ],
@@ -314,52 +300,29 @@ class _BlockEditorWidgetState extends State<BlockEditorWidget> {
     required String label,
     required Color color,
     required VoidCallback onPressed,
-  }) {
-    return TextButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, color: color),
-      label: Text(
-        label,
-        style: GoogleFonts.roboto(
-          color: color,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      style: TextButton.styleFrom(
-        backgroundColor: color.withValues(alpha: 0.1),
-        padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8.0),
-        ),
-      ),
-    );
-  }
+  }) => TextButton.icon(
+    onPressed: _busy ? null : onPressed,
+    icon: Icon(icon, color: color),
+    label: Text(
+      label,
+      style: TextStyle(color: color, fontWeight: FontWeight.bold),
+    ),
+    style: TextButton.styleFrom(backgroundColor: color.withValues(alpha: 0.1)),
+  );
 }
 
-// Grid painter for workspace background
 class GridPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.grey[200]!
-      ..strokeWidth = 1.0;
-
-    const double spacing = 20.0;
-
-    for (double i = 0; i < size.width; i += spacing) {
-      canvas.drawLine(
-        Offset(i, 0),
-        Offset(i, size.height),
-        paint,
-      );
+      ..color = Colors.grey.shade200
+      ..strokeWidth = 1;
+    const spacing = 20.0;
+    for (double x = 0; x < size.width; x += spacing) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
     }
-
-    for (double i = 0; i < size.height; i += spacing) {
-      canvas.drawLine(
-        Offset(0, i),
-        Offset(size.width, i),
-        paint,
-      );
+    for (double y = 0; y < size.height; y += spacing) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
     }
   }
 

@@ -1,18 +1,25 @@
 # Educational Robot
 
+> **P1 development revision:** the app/firmware control path now targets the confirmed 28BYJ-48 + ULN2003 build. Use the [new wiring](hardware/wiring.md) and matching app/firmware together. Hardware validation, printable exports and research reconciliation remain open; see [P1 status and test results](docs/p1-status.md).
+
+> **P2 update:** named local Save/Open, execution-based practice progress, Bluetooth-only connection controls and a matching five-level curriculum are implemented. See [P2 status, tests and remaining work](docs/p2-status.md).
+
+> **Android packaging:** the selected release ID, upgraded build tools and private-signing workflow are documented in the [release guide](docs/android-release.md). Debug packages are labeled RoboCode (Test); physical acceptance and a signed distribution release remain open.
+
+> **Physical build handoff:** use the corrected [assembly guide](docs/assembly-guide.md), [blank acceptance record](docs/hardware-acceptance.md) and [CAD inventory/export checklist](hardware/cad-release.md). CAD inspection awaits the owner's CATIA installation; no physical tests or exports are claimed complete.
+
 An affordable educational robotics platform designed to teach programming concepts to children aged 7-12 through hands-on interaction with a physical robot (developed as part of my engineering final year project internship).
 
 ![Robot Image](docs/images/robot-overview.jpg)
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32-green.svg)
-![Flutter](https://img.shields.io/badge/Flutter-2.0+-blue.svg)
-![Cost](https://img.shields.io/badge/cost-under%20$40-brightgreen.svg)
+![Flutter](https://img.shields.io/badge/Flutter-3.41.4-blue.svg)
 ![Age](https://img.shields.io/badge/age-7--12%20years-orange.svg)
 
 ## 🎯 Project Overview
 
-This project bridges the gap between simple toy robots and expensive educational kits by providing a **sub-$40 solution** that delivers comparable learning outcomes. The system combines:
+This prototype explores an affordable way to teach programming with a physical robot. The selected protected battery, regulator and external charger exceed the historical $40 parts estimate; see the [current parts selection and cost snapshot](hardware/power-system.md). A complete delivered build cost and comparative learning outcomes have not yet been established. The system combines:
 
 - **ESP32-based hardware** with stepper motors and sensors
 - **Flutter mobile app** with visual block programming
@@ -21,12 +28,12 @@ This project bridges the gap between simple toy robots and expensive educational
 
 ## ✨ Key Features
 
-- 📱 **Mobile-first design** - Works on any smartphone/tablet
-- 💰 **Affordable** - Total cost under $40
+- 📱 **Mobile-first design** - Flutter app with Android as the current build target
+- 💰 **Cost-conscious design** - Documented parts selection; complete delivered costing pending
 - 🎮 **Visual programming** - Custom block-based interface
-- 🤖 **Autonomous navigation** - Enhanced E-Bug algorithm
+- 🤖 **Auto Navigate** - Experimental three-second reactive activity
 - 📊 **Real-time feedback** - Live sensor data visualization
-- 🌐 **Offline capable** - No internet required after setup
+- 💾 **Local programs** - Save/Open on the device; robot control uses Bluetooth
 - 🔓 **Open source** - MIT license for educational use
 
 ## 🚀 Quick Start
@@ -34,17 +41,17 @@ This project bridges the gap between simple toy robots and expensive educational
 ### Prerequisites
 - ESP32 development board
 - 3D printer for chassis parts
-- Android/iOS device for programming
+- Compatible Android device with Bluetooth Low Energy for programming
 - Basic soldering skills
 
 ### Hardware Assembly
-1. 3D print chassis components from `/hardware/3d-models/`
+1. Review the native CAD in `hardware/`; printable STL exports are still pending and `hardware/3d-models/` is not yet supplied
 2. Follow the [Assembly Guide](docs/assembly-guide.md)
-3. Upload firmware using Arduino IDE or PlatformIO
+3. Use the [selected motor/power parts](hardware/power-system.md) and [revised ULN2003 wiring](hardware/wiring.md), then build/upload the modular firmware using PlatformIO
 
 ### Software Setup
-1. Install the mobile app (APK available in releases)
-2. Pair with robot via Bluetooth
+1. Build the matching Android app from `mobile-app/` (see development instructions below)
+2. Connect to the robot using the app's Bluetooth screen
 3. Start with Level 1 programming challenges
 
 ## 📚 Documentation
@@ -57,34 +64,32 @@ This project bridges the gap between simple toy robots and expensive educational
 ## 🏗️ Project Structure
 
 ```
-├── hardware/          # CAD files, STL models, schematics
+├── hardware/          # Native CATIA files and wiring guide; STL exports pending
 ├── firmware/          # ESP32 Arduino code (PlatformIO)
 ├── mobile-app/        # Flutter application
 ├── docs/              # All documentation, guides, and research
 └── .github/           # CI/CD workflows
 ```
 
-## 📋 Bill of Materials
+## 📋 Selected Bill of Materials
 
-| Component | Quantity | Est. Cost | Notes |
-|-----------|----------|-----------|-------|
-| ESP32-WROOM-32 | 1 | $8 | Main microcontroller |
-| Stepper Motors (28BYJ-48) | 2 | $6 | With ULN2003 drivers |
-| HC-SR04 Ultrasonic | 1 | $3 | Distance sensor |
-| MPU6050 IMU | 1 | $4 | Orientation tracking |
-| Li-Po Battery 7.4V | 1 | $8 | 2000mAh capacity |
-| 3D Printing Filament | ~200g | $6 | PLA recommended |
-| Miscellaneous | - | $5 | Wires, screws, etc. |
-| **Total** | | **~$40** | |
+| Component | Quantity | Reference selection |
+|-----------|----------|---------------------|
+| ESP32 controller | 1 | ESP32-DevKitC V4 with WROOM module; verify any existing alternative board |
+| 5 V motor + ULN2003 board | 2 kits | Olimex SM-5VDC-DRV, nominal 1:64 |
+| Protected Li-ion battery | 1 | Tenergy 31003, 7.4 V / 2200 mAh |
+| Fixed 5 V regulator | 1 | Pololu D24V22F5, item 2858 |
+| External charger | 1 | Tenergy TLP-4000, item 01281 |
+| HC-SR04 / MPU6050 | 1 each | Echo divider and 3.3 V-compatible IMU module |
+| Power harness and protection | 1 set | DC fuse/switch, keyed connectors, insulated wiring and capacitors |
+| Sensing dividers | 2 pairs | 2.2k/3.3k Echo; 20k/10k battery, 1% |
+| Chassis, wheels and mounting hardware | 1 set | CAD/print fit and mechanical dimensions still require verification |
+
+The [power-system specification](hardware/power-system.md) is the source for purchase links, ratings, the current budget and charging procedure. The four selected motor/power lines total **USD 67.43 plus EUR 5.00**, excluding the rest of this table, fabrication, tax and shipping. No complete-build price or measured runtime is claimed.
 
 ## 🎓 Educational Impact
 
-Based on testing with 24 students aged 7-12:
-
-- **89% average improvement** in programming concept understanding
-- **100% success rate** for basic programming tasks
-- **75% success rate** for autonomous navigation programming
-- **45 minutes average** sustained engagement time
+The project documentation reports a pilot with 24 students aged 7-12. The author confirms that the study is real, but the aggregate results, session statistics and delayed follow-up claims require reconciliation against the original records. See [Research & Evaluation](docs/research-documentation.md) and the [reconciliation checklist](docs/research-reconciliation.md) before citing results. App progress indicators are not evidence of educational effectiveness.
 
 ## 🛠️ Development
 
@@ -94,15 +99,17 @@ cd firmware/
 # Using PlatformIO
 pio run --target upload
 
-# Using Arduino IDE
-# Open main.cpp and upload to ESP32
+# firmware/legacy is historical; it does not contain the current motor/safety fixes.
 ```
 
 ### Building the Mobile App
 ```bash
 cd mobile-app/
+# Tested toolchain: Flutter 3.41.4 / Dart 3.11.1
 flutter pub get
 flutter run
+# To produce a local Android test package:
+flutter build apk --debug
 ```
 
 ## 🤝 Contributing
@@ -118,6 +125,8 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## 📊 Performance Benchmarks
 
+The following are historical reported figures. They have not been remeasured with this P1 motor/protocol revision and are not acceptance results for the updated code.
+
 - **Movement Accuracy**: ±2cm per meter
 - **Battery Life**: ~90 minutes continuous use
 - **BLE Range**: 12+ meters
@@ -126,10 +135,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ## 🌍 Localization
 
-Currently supported languages:
-- English
-- Arabic
-- Looking for translators for French, Spanish, Portuguese
+The current app interface is English. Arabic localization is not implemented or validated in this build; translations into Arabic, French, Spanish and Portuguese are future contributions.
 
 ## 📄 License
 

@@ -1,0 +1,7 @@
+# Copy to key.properties and fill in locally. Never commit passwords or keystores.
+# Use an absolute path with forward slashes, even on Windows.
+# Relative paths resolve from mobile-app/android, not android/app.
+storeFile=
+storePassword=
+keyAlias=upload
+keyPassword=

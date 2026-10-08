@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-10-08",
+  "scope": "Native CAD file identity only; geometry, assembly references and fit not validated.",
+  "files": [
+    {
+      "path": "hardware/jh.CATPart",
+      "kind": "CATPart",
+      "bytes": 553637,
+      "sha256": "f27f6dfe58e21a51c91e1ce65ae32a94aa445fc393cc7df6f6b04268af7359e1"
+    },
+    {
+      "path": "hardware/miter-gear-and-driver-gear-to-drive-it-make-the-driver-gear-one-half-size-of-the-miter-gear (1).CATProduct",
+      "kind": "CATProduct",
+      "bytes": 15896,
+      "sha256": "29d6989f01e87c73a288d0129b5823a4b666c018c1fba71240ecf7dadd9b06d7"
+    },
+    {
+      "path": "hardware/Part1.CATPart",
+      "kind": "CATPart",
+      "bytes": 367475,
+      "sha256": "2ac3fb4c9add1b76ad2f3e2d9552750779cb2a1dbc03c3547b84f0971ddddda2"
+    },
+    {
+      "path": "hardware/Part2.CATPart",
+      "kind": "CATPart",
+      "bytes": 171317,
+      "sha256": "ec082e63d334d152ef765f437425de05b122433027d8b56126e3f940ae3af36b"
+    },
+    {
+      "path": "hardware/Part3 (1).CATPart",
+      "kind": "CATPart",
+      "bytes": 83476,
+      "sha256": "826a67e3377d07304e087bd4f1a15927fcf80322e88ddbe0fe06f0b884617c81"
+    },
+    {
+      "path": "hardware/Part3.CATPart",
+      "kind": "CATPart",
+      "bytes": 83476,
+      "sha256": "826a67e3377d07304e087bd4f1a15927fcf80322e88ddbe0fe06f0b884617c81"
+    },
+    {
+      "path": "hardware/Part4.CATPart",
+      "kind": "CATPart",
+      "bytes": 194926,
+      "sha256": "cc41d5dcff97362e0d74fc224f2a6212cf1caeac4f04087dab3a57465a866eae"
+    },
+    {
+      "path": "hardware/Part6.CATPart",
+      "kind": "CATPart",
+      "bytes": 227954,
+      "sha256": "37229334bfa3f3cc287ff75aa662c96cbb74036b853c715b6f236cdf4adfed8d"
+    },
+    {
+      "path": "hardware/Product1 1.CATProduct",
+      "kind": "CATProduct",
+      "bytes": 80326,
+      "sha256": "293ac0a86fb564d2f3ae7de5389d7bd5e347ca9cd8106717d0b110d794b49c9a"
+    },
+    {
+      "path": "hardware/Product1.CATProduct",
+      "kind": "CATProduct",
+      "bytes": 79714,
+      "sha256": "0cafccff901c47ee495d4ca08833b843a8c19e5aaf1b789f9fcb9e36ec5aadee"
+    },
+    {
+      "path": "hardware/Product3.CATProduct",
+      "kind": "CATProduct",
+      "bytes": 28491,
+      "sha256": "f9fad055f1dee93912374b9393004ab6b46aad7e4117a19f918aecb69d9cd09f"
+    },
+    {
+      "path": "hardware/StepperMotor.CATPart",
+      "kind": "CATPart",
+      "bytes": 78186,
+      "sha256": "e5889f9e89ae3c90ff07ffe753ff5e3dcd4e746dd66348dabace639346d9b33e"
+    },
+    {
+      "path": "hardware/Zoo Text-to-CAD_1.CATPart",
+      "kind": "CATPart",
+      "bytes": 343300,
+      "sha256": "7f2e35b9a90e06a2bbd1ff19c0306b67da909ff01b4398cf4ef2e06e570d508f"
+    },
+    {
+      "path": "hardware/Zoo Text-to-CAD_2.CATPart",
+      "kind": "CATPart",
+      "bytes": 321603,
+      "sha256": "577862445ae56637a582f7b9eb3cd3b8cde636ecfac54804104995e16e2e81e9"
+    }
+  ],
+  "byte_identical_groups": [
+    [
+      "hardware/Part3 (1).CATPart",
+      "hardware/Part3.CATPart"
+    ]
+  ]
+}

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../services/app_state.dart';
+import '../services/levels_service.dart';
 import '../main.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -23,7 +24,8 @@ class HomeScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(20),
                 image: DecorationImage(
                   image: NetworkImage(
-                      'https://images.pexels.com/photos/2085831/pexels-photo-2085831.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1'),
+                    'https://images.pexels.com/photos/2085831/pexels-photo-2085831.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=1',
+                  ),
                   fit: BoxFit.cover,
                   colorFilter: ColorFilter.mode(
                     Colors.purple.withValues(alpha: 0.7),
@@ -33,7 +35,7 @@ class HomeScreen extends StatelessWidget {
                 gradient: LinearGradient(
                   colors: [
                     Colors.purple[300]!.withValues(alpha: 0.9),
-                    Colors.purple[400]!.withValues(alpha: 0.9)
+                    Colors.purple[400]!.withValues(alpha: 0.9),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -84,7 +86,7 @@ class HomeScreen extends StatelessWidget {
 
           // Level Progress
           Text(
-            'Your Progress',
+            'Robot Practice Progress',
             style: GoogleFonts.comicNeue(
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -94,9 +96,8 @@ class HomeScreen extends StatelessWidget {
           SizedBox(height: 16),
           _buildLevelCard(
             level: 1,
-            title: 'Basic Movement',
-            description:
-                'Learn to move your robot forward, backward, left, and right!',
+            title: LevelsService.getLevelById(1).name,
+            description: LevelsService.getLevelById(1).description,
             isCompleted: appState.isLevelCompleted(1),
             isActive: appState.currentLevel == 1,
             isLocked: !appState.isLevelUnlocked(1),
@@ -105,21 +106,22 @@ class HomeScreen extends StatelessWidget {
             onTap: () {
               if (appState.isLevelUnlocked(1)) {
                 appState.setCurrentLevel(1);
-                final parentState =
-                    context.findAncestorStateOfType<RoboCodeHomePageState>();
+                final parentState = context
+                    .findAncestorStateOfType<RoboCodeHomePageState>();
                 if (parentState != null) {
                   parentState.onItemTapped(2); // Index of Code tab
                 } else {
                   debugPrint(
-                      "Error: RoboCodeHomePageState not found. Navigation aborted.");
+                    "Error: RoboCodeHomePageState not found. Navigation aborted.",
+                  );
                 }
               }
             },
           ),
           _buildLevelCard(
             level: 2,
-            title: 'Path Planning',
-            description: 'Create sequences of moves to reach your goal!',
+            title: LevelsService.getLevelById(2).name,
+            description: LevelsService.getLevelById(2).description,
             isCompleted: appState.isLevelCompleted(2),
             isActive: appState.currentLevel == 2,
             isLocked: !appState.isLevelUnlocked(2),
@@ -136,8 +138,8 @@ class HomeScreen extends StatelessWidget {
           ),
           _buildLevelCard(
             level: 3,
-            title: 'Sensor Magic',
-            description: 'Use sensors to detect obstacles and react!',
+            title: LevelsService.getLevelById(3).name,
+            description: LevelsService.getLevelById(3).description,
             isCompleted: appState.isLevelCompleted(3),
             isActive: appState.currentLevel == 3,
             isLocked: !appState.isLevelUnlocked(3),
@@ -154,8 +156,8 @@ class HomeScreen extends StatelessWidget {
           ),
           _buildLevelCard(
             level: 4,
-            title: 'Auto Mode',
-            description: 'Make your robot navigate on its own!',
+            title: LevelsService.getLevelById(4).name,
+            description: LevelsService.getLevelById(4).description,
             isCompleted: appState.isLevelCompleted(4),
             isActive: appState.currentLevel == 4,
             isLocked: !appState.isLevelUnlocked(4),
@@ -172,8 +174,8 @@ class HomeScreen extends StatelessWidget {
           ),
           _buildLevelCard(
             level: 5,
-            title: 'Advanced Navigation',
-            description: 'Master complex autonomous robot behaviors!',
+            title: LevelsService.getLevelById(5).name,
+            description: LevelsService.getLevelById(5).description,
             isCompleted: appState.isLevelCompleted(5),
             isActive: appState.currentLevel == 5,
             isLocked: !appState.isLevelUnlocked(5),
@@ -211,8 +213,9 @@ class HomeScreen extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         child: Card(
           elevation: isActive ? 12 : 8,
-          shadowColor:
-              isLocked ? Colors.grey.withValues(alpha: 0.3) : color.withValues(alpha: 0.3),
+          shadowColor: isLocked
+              ? Colors.grey.withValues(alpha: 0.3)
+              : color.withValues(alpha: 0.3),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -224,7 +227,10 @@ class HomeScreen extends StatelessWidget {
                       end: Alignment.bottomRight,
                     )
                   : LinearGradient(
-                      colors: [color.withValues(alpha: 0.1), color.withValues(alpha: 0.05)],
+                      colors: [
+                        color.withValues(alpha: 0.1),
+                        color.withValues(alpha: 0.05),
+                      ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -235,8 +241,9 @@ class HomeScreen extends StatelessWidget {
                   width: 70,
                   height: 70,
                   decoration: BoxDecoration(
-                    color:
-                        isLocked ? Colors.grey[300] : color.withValues(alpha: 0.15),
+                    color: isLocked
+                        ? Colors.grey[300]
+                        : color.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: isLocked
                         ? []
@@ -264,20 +271,25 @@ class HomeScreen extends StatelessWidget {
                     children: [
                       Row(
                         children: [
-                          Text(
-                            'Level $level: $title',
-                            style: GoogleFonts.comicNeue(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color:
-                                  isLocked ? Colors.grey : Colors.indigo[900],
-                              height: 1.2,
+                          Expanded(
+                            child: Text(
+                              'Level $level: $title',
+                              style: GoogleFonts.comicNeue(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: isLocked
+                                    ? Colors.grey
+                                    : Colors.indigo[900],
+                                height: 1.2,
+                              ),
                             ),
                           ),
                           if (isCompleted)
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                               margin: const EdgeInsets.only(left: 8),
                               decoration: BoxDecoration(
                                 color: Colors.green.withValues(alpha: 0.1),
